@@ -14,6 +14,7 @@ import {
   type AgentInfo,
   type SessionInfo,
   type ModelRef,
+  type MessageWithParts,
   type ParsedAgentPlugin,
   type PluginFileSystem,
 } from "@zmzai/agent-framework";
@@ -85,6 +86,11 @@ export class EngineRuntime {
 
   async listSessions(): Promise<SessionInfo[]> {
     return this.fw.store.listSessions({ userId: "local", workspaceId: "local" });
+  }
+
+  /** 读取某会话已持久化的完整转录（消息+片段），用于跨会话恢复历史。 */
+  async getMessages(sessionId: string): Promise<MessageWithParts[]> {
+    return this.fw.store.getMessages(sessionId);
   }
 
   /** 订阅某会话的事件流（token 增量、工具调用、权限请求等） */

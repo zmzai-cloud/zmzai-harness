@@ -43,6 +43,32 @@ const session = await fw.createSession({
 });
 console.log("[smoke] session created:", session.id, "title:", session.title);
 
+// 验证转录持久化 + 跨会话恢复（history replay 的数据基础）：
+// 直接写消息/片段到 store（模拟一次真实 run 的持久化），再用「新 store 实例」重新载入。
+const now = () => new Date().toISOString();
+await fw.store.appendMessage({
+  id: "msg_user1", sessionId: session.id, role: "user", agent: "default",
+  model: { providerId: "openai", modelId: "gpt-4o" }, time: { created: now() },
+});
+await fw.store.appendPart({ id: "part_u1", sessionId: session.id, messageId: "msg_user1", type: "text", text: "帮我看下 README" });
+await fw.store.appendMessage({
+  id: "msg_asst1", sessionId: session.id, role: "assistant", parentId: "msg_user1", agent: "default",
+  model: { providerId: "openai", modelId: "gpt-4o" }, time: { created: now(), completed: now() },
+});
+await fw.store.appendPart({ id: "part_a1", sessionId: session.id, messageId: "msg_asst1", type: "text", text: "好的，我来读 README。" });
+await fw.store.appendPart({
+  id: "part_a2", sessionId: session.id, messageId: "msg_asst1", type: "tool", callId: "call_1", tool: "read",
+  state: { status: "completed", input: { path: "README.md" }, output: "hello", title: "read README.md", time: { start: now(), end: now() } },
+});
+
+const store2 = createJsonlSessionStore({ dataDir }); // 模拟进程重启后重新打开
+const reloaded = await store2.getMessages(session.id);
+console.log("[smoke] reloaded messages:", reloaded.length);
+if (reloaded.length !== 2) throw new Error("转录恢复失败：消息数应为 2，实际 " + reloaded.length);
+const toolPart = reloaded.find((m) => m.info.role === "assistant").parts.find((p) => p.type === "tool");
+if (!toolPart || toolPart.state.status !== "completed") throw new Error("工具片段未正确恢复");
+console.log("[smoke] transcript reload ok");
+
 // 订阅事件流（不 prompt，避免真实 LLM 调用），确认事件机制可用
 const ac = new AbortController();
 setTimeout(() => ac.abort(), 400);

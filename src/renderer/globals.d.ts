@@ -9,6 +9,7 @@ declare global {
       abort: (sessionId: string) => Promise<void>;
       listAgents: () => Promise<import("./types").AgentInfo[]>;
       listSessions: () => Promise<import("./types").SessionInfo[]>;
+      getMessages: (sessionId: string) => Promise<import("./types").TranscriptMessage[]>;
       listDir: (relPath: string) => Promise<{ name: string; path: string; isDirectory: boolean; size: number }[]>;
       readFile: (relPath: string) => Promise<string | null>;
       loadPlugin: (root: string) => Promise<unknown>;

@@ -68,6 +68,7 @@ function registerIpc(): void {
   ipcMain.handle("harness:abort", (_e, sessionId: string) => runtime.abort(sessionId));
   ipcMain.handle("harness:list-agents", () => runtime.listAgents());
   ipcMain.handle("harness:list-sessions", () => runtime.listSessions());
+  ipcMain.handle("harness:get-messages", (_e, sessionId: string) => runtime.getMessages(sessionId));
   ipcMain.handle("harness:list-dir", (_e, relPath: string) => runtime.listDir(relPath));
   ipcMain.handle("harness:read-file", (_e, relPath: string) => runtime.readFile(relPath));
   ipcMain.handle("harness:load-plugin", (_e, root: string) => runtime.loadPlugin(root));

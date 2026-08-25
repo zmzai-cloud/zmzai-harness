@@ -1,9 +1,22 @@
 import { useEffect, useState } from "react";
-import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest } from "./types";
+import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage } from "./types";
 import SessionList from "./components/SessionList";
 import ChatView from "./components/ChatView";
 import FileTree from "./components/FileTree";
 import PluginPanel from "./components/PluginPanel";
+
+/** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
+ *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
+function transcriptToEvents(messages: TranscriptMessage[]): HarnessEvent[] {
+  const out: HarnessEvent[] = [];
+  for (const m of messages) {
+    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role } } });
+    for (const p of m.parts) {
+      out.push({ type: "message.part.updated", data: { part: p } });
+    }
+  }
+  return out;
+}
 
 export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -26,16 +39,25 @@ export default function App() {
       setPending(null);
       return;
     }
+    let cancelled = false;
     setEvents([]);
     setStatus("idle");
     setPending(null);
+    // 跨会话恢复：载入该会话已持久化的历史转录，渲染成消息树
+    window.harness.getMessages(activeId).then((msgs) => {
+      if (cancelled) return;
+      setEvents(transcriptToEvents(msgs));
+    });
     const unsub = window.harness.subscribe(activeId, (ev) => {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") setPending((ev.data as { request: PermissionRequest }).request);
       else if (ev.type === "permission.replied") setPending(null);
       setEvents((prev) => [...prev, ev]);
     });
-    return unsub;
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [activeId]);
 
   const refreshSessions = () => window.harness.listSessions().then(setSessions);

@@ -13,6 +13,7 @@ const harness = {
   abort: (sessionId: string) => ipcRenderer.invoke("harness:abort", sessionId),
   listAgents: () => ipcRenderer.invoke("harness:list-agents"),
   listSessions: () => ipcRenderer.invoke("harness:list-sessions"),
+  getMessages: (sessionId: string) => ipcRenderer.invoke("harness:get-messages", sessionId),
   listDir: (relPath: string) => ipcRenderer.invoke("harness:list-dir", relPath),
   readFile: (relPath: string) => ipcRenderer.invoke("harness:read-file", relPath),
   loadPlugin: (root: string) => ipcRenderer.invoke("harness:load-plugin", root),
