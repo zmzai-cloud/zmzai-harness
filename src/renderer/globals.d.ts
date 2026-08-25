@@ -1,0 +1,20 @@
+export {};
+
+declare global {
+  interface Window {
+    harness: {
+      createSession: (agent?: string, model?: { providerId: string; modelId: string }) => Promise<import("./types").SessionInfo>;
+      prompt: (sessionId: string, text: string, agent?: string, model?: { providerId: string; modelId: string }) => Promise<{ queued: boolean }>;
+      replyPermission: (sessionId: string, requestId: string, reply: "once" | "always" | "reject", feedback?: string) => Promise<boolean>;
+      abort: (sessionId: string) => Promise<void>;
+      listAgents: () => Promise<import("./types").AgentInfo[]>;
+      listSessions: () => Promise<import("./types").SessionInfo[]>;
+      listDir: (relPath: string) => Promise<{ name: string; path: string; isDirectory: boolean; size: number }[]>;
+      readFile: (relPath: string) => Promise<string | null>;
+      loadPlugin: (root: string) => Promise<unknown>;
+      installPlugin: (root: string) => Promise<unknown>;
+      trustedPlugins: () => Promise<string[]>;
+      subscribe: (sessionId: string, cb: (ev: import("./types").HarnessEvent) => void) => () => void;
+    };
+  }
+}

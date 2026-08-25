@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+*.log
+.env
+.env.local
+.harness-data/
+.workspace/
+.DS_Store
+components.d.ts
