@@ -9,7 +9,7 @@
 |---|---|---|---|
 | Agent 循环 + 事件流 | 全部 | SessionRunner + compaction + lease-recovery | ✅ |
 | 权限/审批 | opencode permission/policy、gemini confirmation-bus | PermissionEngine + ruleset + 桌面弹窗（pi 甚至没有权限系统） | ✅ |
-| 工具集 | opencode 16+、codex tools/ | read/glob/grep/write/edit/bash/todo/task/webfetch/qa-check 共 9 个 + git_status/git_diff/git_log/git_commit + terminal_start/read/write/kill/list（2026-08-27）；缺 websearch、apply-patch | ⚠️ |
+| 工具集 | opencode 16+、codex tools/ | read/glob/grep/write/edit/bash/todo/task/webfetch/qa-check + git_status/diff/log/commit + terminal_start/read/write/kill/list + **websearch + apply_patch（2026-08-27 全部落地，工具面 16 个）** | ✅ |
 | 上下文压缩 | opencode、codex context-fragments | compaction.ts | ✅ |
 | 文件监视 | codex file-watcher、opencode filesystem | 无 | ❌ |
 | Hooks 生命周期 | codex hooks/、gemini hooks/、opencode event.ts | 无（只有被动事件流） | ❌ |
@@ -58,10 +58,10 @@
 ## 优先级路线图
 
 **P0 — Harness 立身之本**
-1. ~~MCP client~~ → **2026-08-27 stdio 已落地**（框架 `core/mcp/`：NDJSON JSON-RPC 客户端 + initialize/tools 翻页/callTool + 外部工具适配 ExternalToolDef；harness 扫描已装插件 mcp.json 自动启动并注入下一轮对话，插件面板有连接状态）。**待补：SSE 与 streamable-http 传输。**
+1. ~~MCP client~~ → **✅ 全完成（2026-08-27）**：stdio（NDJSON JSON-RPC）+ **streamable-http（单端点 POST、SSE/json 双应答形态、mcp-session-id 回传）+ sse 遗留传输（endpoint 握手、GET 流承载数据）**三种客户端与本地 fixture 测试全过；插件面板状态 UI。**P0 第 1 项无遗留。**
 2. ~~git 工具集 + pty 交互终端~~ → **全部落地（2026-08-27）**：git 四件见上表；终端为框架 `core/tools/terminal.ts` 五工具（TerminalManager 环形缓冲 + 游标续读）+ 宿主后端动态探测 node-pty（真 PTY）/管道降级。**坑位记录：node-pty@1.1.0 prebuilds 的 spawn-helper 丢可执行位 → posix_spawnp failed，harness postinstall 脚本已固化修复；其 signal=0 需归一化为无信号；prebuilds 跨运行时（本地实测 Node 直接可用），打包 Electron 时如有 ABI 报错跑 `pnpm rebuild:native`**
-3. hooks 生命周期扩展点（工具调用前/后等），插件生态地基
-4. websearch / apply_patch 工具补齐
+3. ~~hooks 生命周期扩展点~~ → **2026-08-27 落地**（`core/runtime/lifecycle.ts` 四钩子 onRunStart/onBeforeToolCall/onAfterToolCall/onRunEnd；before 可拦截并反馈模型，钩子抛错只告警不中断；createServer/hooks 透传）
+4. ~~websearch / apply_patch 工具补齐~~ → **2026-08-27 落地**（websearch：Tavily/Serper/DuckDuckGo-Lite 三后端自动选择、fetch/env 可注入零网络测试；apply_patch：统一 diff 多文件多 hunk 两阶段应用，走 workspace 门面出可回滚版本）
 
 **P1 — 模型层扩展**
 5. 多 provider 抽象（pi-ai 式统一层）+ 路由/降级
