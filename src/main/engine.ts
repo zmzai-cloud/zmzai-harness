@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { promises as fsp, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import {
   createServer,
@@ -10,6 +10,7 @@ import {
   subscribeEventLog,
   loadCustomAgents,
   parseAgentPlugin,
+  startMcpServers,
   type AgentFramework,
   type AgentInfo,
   type SessionInfo,
@@ -17,6 +18,9 @@ import {
   type MessageWithParts,
   type ParsedAgentPlugin,
   type PluginFileSystem,
+  type AnyToolDef,
+  type McpPoolResult,
+  type McpServerStatus,
 } from "@zmzai/agent-framework";
 
 export type DirEntry = { name: string; path: string; isDirectory: boolean; size: number };
@@ -24,12 +28,36 @@ export type Reply = "once" | "always" | "reject";
 
 const TRUSTED_PLUGINS_FILE = "trusted-plugins.json";
 
+/** resolve 后强制落在 workspaceRoot 内；绝对路径或 ../ 逃逸一律拒绝。
+ *  渲染进程是不可信输入面——IPC 露出的文件接口必须有这道防御。 */
+function safeJoin(root: string, relPath: string): string | null {
+  const abs = resolve(root, relPath);
+  if (abs !== root && !abs.startsWith(root + sep)) return null;
+  return abs;
+}
+
+/** 展开 Agent Plugins 1.0 保留占位符（宿主职责）：${PLUGIN_ROOT}=插件目录，
+ *  ${PLUGIN_DATA}=数据目录下同名子目录。 */
+export function expandPlaceholders(value: string, placeholders: Record<string, string>): string {
+  let out = value;
+  for (const [key, replacement] of Object.entries(placeholders)) {
+    out = out.split(key).join(replacement);
+  }
+  return out;
+}
+
 /** 封装 @zmzai/agent-framework 的本地运行时：JSONL 持久化 + 本机 FS 工作区 +
  *  本机子进程沙箱 + OpenAI 兼容 LLM。不依赖 electron，便于 headless 测试。 */
 export class EngineRuntime {
   readonly fw: AgentFramework;
   readonly workspaceRoot: string;
   readonly dataDir: string;
+
+  /** 稳定引用的本地工具数组（MCP 工具注入点）：runner 每次 run 都会重读，
+   *  所以 initMcpServers() 就地清空重建即可对下一次 prompt 生效。 */
+  readonly #localTools: AnyToolDef[] = [];
+  #mcpPool: McpPoolResult | null = null;
+  #mcpStatuses: McpServerStatus[] = [];
 
   constructor(opts: { dataDir: string; workspaceRoot: string }) {
     this.dataDir = resolve(opts.dataDir);
@@ -50,6 +78,7 @@ export class EngineRuntime {
       workspaceFor,
       sandbox: createSubprocessSandbox(),
       subagentDepth: 2,
+      localTools: this.#localTools,
       // 加载工作区 .zmzai/agents/*.md 作为自定义 Agent（多 Agent 支持）
       loadWorkspaceAgents: async () => {
         const ws = createFsWorkspaceFiles({ root: this.workspaceRoot });
@@ -100,8 +129,8 @@ export class EngineRuntime {
 
   /** 分层文件树（基于本机 fs，独立于 agent 工作区的虚拟 list） */
   async listDir(relPath = ""): Promise<DirEntry[]> {
-    const abs = resolve(this.workspaceRoot, relPath);
-    if (!existsSync(abs)) return [];
+    const abs = safeJoin(this.workspaceRoot, relPath);
+    if (!abs || !existsSync(abs)) return [];
     let entries;
     try {
       entries = readdirSync(abs, { withFileTypes: true });
@@ -129,8 +158,10 @@ export class EngineRuntime {
   }
 
   async readFile(relPath: string): Promise<string | null> {
+    const abs = safeJoin(this.workspaceRoot, relPath);
+    if (!abs) return null; // 越界拒绝
     try {
-      return await fsp.readFile(resolve(this.workspaceRoot, relPath), "utf8");
+      return await fsp.readFile(abs, "utf8");
     } catch {
       return null;
     }
@@ -200,4 +231,80 @@ export class EngineRuntime {
     }
     return parsed;
   }
+
+  /** 扫描工作区 .zmzai/plugins 下各插件目录的 mcp.json，启动全部 stdio
+   *  server，并把工具注入 localTools（对下一次 prompt 生效）。重复调用会先
+   *  关停上一批 server。返回每个 server 的连接状态。 */
+  async initMcpServers(): Promise<McpServerStatus[]> {
+    this.#mcpPool?.dispose();
+    this.#mcpPool = null;
+    this.#localTools.length = 0;
+    this.#mcpStatuses = [];
+
+    const pluginsRoot = resolve(this.workspaceRoot, ".zmzai", "plugins");
+    if (!existsSync(pluginsRoot)) return [];
+    const parsed: ParsedAgentPlugin[] = [];
+    for (const entry of readdirSync(pluginsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        parsed.push(await this.loadPlugin(resolve(pluginsRoot, entry.name)));
+      } catch {
+        /* plugin.json 不合法的目录直接跳过（安装入口已校验过） */
+      }
+    }
+    const entries = collectMcpEntries({
+      pluginsRoot,
+      pluginDataRoot: resolve(this.dataDir, "plugins"),
+      parsed,
+    });
+    if (!entries.length) return [];
+
+    const pool = await startMcpServers(entries, { connectTimeoutMs: 8000 });
+    this.#mcpPool = pool;
+    this.#localTools.push(...pool.defs);
+    this.#mcpStatuses = pool.statuses;
+    return pool.statuses;
+  }
+
+  mcpStatuses(): McpServerStatus[] {
+    return this.#mcpStatuses;
+  }
+
+  /** 宿主退出时关停全部 MCP 子进程。 */
+  dispose(): void {
+    this.#mcpPool?.dispose();
+    this.#mcpPool = null;
+    this.#localTools.length = 0;
+  }
+}
+
+/** 展开 Agent Plugins 1.0 占位符后汇总待启动的 MCP server 配置（纯函数）。 */
+export function collectMcpEntries(input: {
+  pluginsRoot: string;
+  pluginDataRoot: string;
+  parsed: { manifest: { name: string }; mcpServers: Record<string, import("@zmzai/agent-framework").PluginMcpServer> }[];
+}): { name: string; spec: import("@zmzai/agent-framework").PluginMcpServer }[] {
+  const entries: { name: string; spec: import("@zmzai/agent-framework").PluginMcpServer }[] = [];
+  for (const item of input.parsed) {
+    const pluginRoot = resolve(input.pluginsRoot, item.manifest.name);
+    const pluginData = resolve(input.pluginDataRoot, item.manifest.name);
+    const expand = (value: string) => expandPlaceholders(value, { "${PLUGIN_ROOT}": pluginRoot, "${PLUGIN_DATA}": pluginData });
+    for (const [serverName, spec] of Object.entries(item.mcpServers)) {
+      const qualifiedName = `${item.manifest.name}:${serverName}`;
+      if (spec.type === "stdio") {
+        entries.push({
+          name: qualifiedName,
+          spec: {
+            ...spec,
+            command: expand(spec.command),
+            args: spec.args?.map(expand),
+            cwd: spec.cwd ? expand(spec.cwd) : undefined,
+          },
+        });
+      } else {
+        entries.push({ name: qualifiedName, spec });
+      }
+    }
+  }
+  return entries;
 }

@@ -74,6 +74,9 @@ function registerIpc(): void {
   ipcMain.handle("harness:load-plugin", (_e, root: string) => runtime.loadPlugin(root));
   ipcMain.handle("harness:install-plugin", (_e, root: string) => runtime.installPlugin(root));
   ipcMain.handle("harness:trusted-plugins", () => runtime.trustedPlugins());
+  // MCP：启动/重扫插件 server（返回状态），或仅读取上次缓存的状态
+  ipcMain.handle("harness:mcp-init", () => runtime.initMcpServers());
+  ipcMain.handle("harness:mcp-status", () => runtime.mcpStatuses());
 
   // 事件流订阅：每个会话一个 AbortController，主进程把事件推给渲染进程
   ipcMain.on("harness:subscribe", (event, sessionId: string) => {
@@ -110,4 +113,8 @@ app.on("window-all-closed", () => {
   for (const ac of subscribers.values()) ac.abort();
   subscribers.clear();
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("will-quit", () => {
+  runtime.dispose();
 });

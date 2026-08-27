@@ -15,6 +15,8 @@ declare global {
       loadPlugin: (root: string) => Promise<unknown>;
       installPlugin: (root: string) => Promise<unknown>;
       trustedPlugins: () => Promise<string[]>;
+      initMcp: () => Promise<import("./types").McpServerStatus[]>;
+      mcpStatus: () => Promise<import("./types").McpServerStatus[]>;
       subscribe: (sessionId: string, cb: (ev: import("./types").HarnessEvent) => void) => () => void;
     };
   }

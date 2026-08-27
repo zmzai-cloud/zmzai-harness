@@ -46,5 +46,14 @@ export type PermissionRequest = {
 
 export type HarnessEvent = { type: string; data: unknown };
 
+/** MCP server 连接状态（来自 harness:mcp-init / mcp-status）。 */
+export type McpServerStatus = {
+  name: string;
+  state: "connected" | "error";
+  transport: string;
+  tools: string[];
+  error?: string;
+};
+
 /** 会话已持久化的转录（来自引擎 getMessages）。info 仅用 id/role，parts 即完整片段。 */
 export type TranscriptMessage = { info: { id: string; role: string }; parts: Part[] };

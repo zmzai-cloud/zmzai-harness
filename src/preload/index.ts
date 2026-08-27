@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 export type HarnessEvent = { type: string; data: unknown };
 
+export type McpServerStatus = {
+  name: string;
+  state: "connected" | "error";
+  transport: string;
+  tools: string[];
+  error?: string;
+};
+
 /** 渲染进程通过 window.harness 调主进程引擎。事件流用 onEvent 订阅。 */
 const harness = {
   createSession: (agent?: string, model?: { providerId: string; modelId: string }) =>
@@ -19,6 +27,9 @@ const harness = {
   loadPlugin: (root: string) => ipcRenderer.invoke("harness:load-plugin", root),
   installPlugin: (root: string) => ipcRenderer.invoke("harness:install-plugin", root),
   trustedPlugins: () => ipcRenderer.invoke("harness:trusted-plugins"),
+  /** 启动/重扫已装插件的 MCP server；返回各 server 连接状态。 */
+  initMcp: () => ipcRenderer.invoke("harness:mcp-init") as Promise<McpServerStatus[]>,
+  mcpStatus: () => ipcRenderer.invoke("harness:mcp-status") as Promise<McpServerStatus[]>,
 
   /** 订阅某会话事件流。返回取消函数。 */
   subscribe: (sessionId: string, cb: (ev: HarnessEvent) => void) => {

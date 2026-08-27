@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HarnessEvent, Part, PermissionRequest } from "../types";
 
 type UiMessage = { id: string; role: string; parts: Part[] };
@@ -161,13 +161,19 @@ type Props = {
 export default function ChatView({ events, status, pending, onSend, onReply, onAbort }: Props) {
   const messages = useMemo(() => project(events), [events]);
   const running = status === "running";
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  // 新消息/片段到达时自动滚到底（流式输出的基本体验）
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, pending]);
   return (
     <div className="chat">
       <div className="chat-header">
         <span>对话</span>
         <span className={`status-pill ${status}`}>{statusLabel(status)}</span>
       </div>
-      <div className="messages">
+      <div className="messages" ref={messagesRef}>
         {messages.length === 0 && <div className="empty">新建会话并发送消息，Agent 会在这里工作。</div>}
         {messages.map((m) => (
           <div key={m.id} className={`msg ${m.role}`}>
