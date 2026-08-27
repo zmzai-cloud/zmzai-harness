@@ -9,11 +9,11 @@
 |---|---|---|---|
 | Agent 循环 + 事件流 | 全部 | SessionRunner + compaction + lease-recovery | ✅ |
 | 权限/审批 | opencode permission/policy、gemini confirmation-bus | PermissionEngine + ruleset + 桌面弹窗（pi 甚至没有权限系统） | ✅ |
-| 工具集 | opencode 16+、codex tools/ | read/glob/grep/write/edit/bash/todo/task/webfetch/qa-check 共 9 个；**缺 websearch、apply-patch、git 系列、pty 终端** | ⚠️ |
+| 工具集 | opencode 16+、codex tools/ | read/glob/grep/write/edit/bash/todo/task/webfetch/qa-check 共 9 个，**+ git_status/git_diff/git_log/git_commit（2026-08-27，git_read 默认放行 / git_write 走审批）**；缺 websearch、apply-patch、pty 终端 | ⚠️ |
 | 上下文压缩 | opencode、codex context-fragments | compaction.ts | ✅ |
 | 文件监视 | codex file-watcher、opencode filesystem | 无 | ❌ |
 | Hooks 生命周期 | codex hooks/、gemini hooks/、opencode event.ts | 无（只有被动事件流） | ❌ |
-| Git 集成 | opencode git.ts、codex git-utils | 无（只能 bash 绕） | ❌ |
+| Git 集成 | opencode git.ts、codex git-utils | ✅ 2026-08-27 结构化 status/diff/log/commit 落框架 builtins，commit 真实写仓库（非沙箱快照副本）；变更可视化（diff 渲染视图）待 UI 增强 | ✅(基础) |
 
 ## 二、模型层（差距最大的一档）
 
@@ -59,7 +59,7 @@
 
 **P0 — Harness 立身之本**
 1. ~~MCP client~~ → **2026-08-27 stdio 已落地**（框架 `core/mcp/`：NDJSON JSON-RPC 客户端 + initialize/tools 翻页/callTool + 外部工具适配 ExternalToolDef；harness 扫描已装插件 mcp.json 自动启动并注入下一轮对话，插件面板有连接状态）。**待补：SSE 与 streamable-http 传输。**
-2. git 工具集（status/diff/log 结构化）+ pty 交互终端 ← **下一个目标**
+2. git 工具集（status/diff/log 结构化）+ pty 交互终端 → **git 四件 2026-08-27 已落地**（框架 `core/tools/git.ts`，真实仓库执行 + 权限分类 git_read/git_write）；**剩 pty 终端**
 3. hooks 生命周期扩展点（工具调用前/后等），插件生态地基
 4. websearch / apply_patch 工具补齐
 

@@ -79,4 +79,42 @@ describe("expandPlaceholders / collectMcpEntries", () => {
     await expect(rt.initMcpServers()).resolves.toEqual([]);
     rt.dispose();
   });
+
+  it("构造时注入基线本地工具：git 四件绑定 workspaceRoot", () => {
+    const rt = makeRuntime();
+    const ids = rt.localToolIds();
+    expect(ids).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+    // MCP 重扫后 git 基线仍在
+    return rt.initMcpServers().then(() => {
+      expect(rt.localToolIds()).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+      rt.dispose();
+    });
+  });
+
+  it("git_status 端到端：本机工具注入后可对真实仓库执行并读出变更", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    const dataDir = mkdtempSync(join(tmpdir(), "harness-git-data-"));
+    const ws = mkdtempSync(join(tmpdir(), "harness-git-ws-"));
+    writeFileSync(join(ws, "tracked.txt"), "v1\n");
+    try {
+      await exec("git", ["init"], { cwd: ws });
+      await exec("git", ["config", "user.email", "t@example.com"], { cwd: ws });
+      await exec("git", ["config", "user.name", "T"], { cwd: ws });
+      await exec("git", ["add", "."], { cwd: ws });
+      await exec("git", ["commit", "-m", "init"], { cwd: ws });
+    } catch {
+      return; // 环境无 git 时跳过（框架侧已有 skipIf 完整覆盖）
+    }
+    writeFileSync(join(ws, "notes.md"), "untracked\n");
+    const rt = new EngineRuntime({ dataDir, workspaceRoot: ws });
+    expect(rt.localToolIds()).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+
+    const res = await rt.runLocalTool("git_status", {});
+    expect(res.output).toContain("分支");
+    expect(res.output).toContain("notes.md");
+    // 参数校验路径
+    await expect(rt.runLocalTool("git_commit", {})).rejects.toThrow(/message/);
+  }, 20_000);
 });

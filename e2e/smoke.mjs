@@ -93,5 +93,13 @@ if (!pool.defs.some((d) => d.id === "mcp__demo__echo")) throw new Error("MCP 工
 pool.dispose();
 console.log("[smoke] mcp ok:", pool.statuses[0].name, pool.statuses[0].tools.join(","));
 
+// Git 工具集（P0-2）：dist 导出可实例化且 id 齐全（执行已在框架单测覆盖）
+const { createGitTools } = await import("@zmzai/agent-framework");
+const gitDefs = createGitTools({ cwd: () => process.cwd() });
+if (gitDefs.map((d) => d.id).join() !== "git_status,git_diff,git_log,git_commit") {
+  throw new Error("git 工具导出不完整：" + gitDefs.map((d) => d.id).join(","));
+}
+console.log("[smoke] git tools ok:", gitDefs.length);
+
 console.log("[smoke] PASS");
 process.exit(0);

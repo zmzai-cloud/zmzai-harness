@@ -11,6 +11,7 @@ import {
   loadCustomAgents,
   parseAgentPlugin,
   startMcpServers,
+  createGitTools,
   type AgentFramework,
   type AgentInfo,
   type SessionInfo,
@@ -53,9 +54,11 @@ export class EngineRuntime {
   readonly workspaceRoot: string;
   readonly dataDir: string;
 
-  /** 稳定引用的本地工具数组（MCP 工具注入点）：runner 每次 run 都会重读，
-   *  所以 initMcpServers() 就地清空重建即可对下一次 prompt 生效。 */
-  readonly #localTools: AnyToolDef[] = [];
+  /** 稳定引用的本地工具数组（git + MCP 工具注入点）：runner 每次 run 都会
+   *  重读，所以 initMcpServers() 就地重置即可对下一次 prompt 生效。 */
+  readonly #localTools: AnyToolDef[];
+  /** 基线本地工具（git 工具集，绑定本机 workspaceRoot）；MCP 重扫时保留。 */
+  readonly #baseLocalToolDefs: AnyToolDef[];
   #mcpPool: McpPoolResult | null = null;
   #mcpStatuses: McpServerStatus[] = [];
 
@@ -65,6 +68,10 @@ export class EngineRuntime {
     for (const dir of [this.workspaceRoot, this.dataDir]) {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
+
+    // git 工具直接跑在本机真实仓库上（不是沙箱快照副本，否则 commit 会丢）
+    this.#baseLocalToolDefs = createGitTools({ cwd: () => this.workspaceRoot });
+    this.#localTools = [...this.#baseLocalToolDefs];
 
     const store = createJsonlSessionStore({ dataDir: this.dataDir });
     const eventLog = createMemoryEventLog();
@@ -234,11 +241,12 @@ export class EngineRuntime {
 
   /** 扫描工作区 .zmzai/plugins 下各插件目录的 mcp.json，启动全部 stdio
    *  server，并把工具注入 localTools（对下一次 prompt 生效）。重复调用会先
-   *  关停上一批 server。返回每个 server 的连接状态。 */
+   *  关停上一批 server（基线 git 工具保留）。返回每个 server 的连接状态。 */
   async initMcpServers(): Promise<McpServerStatus[]> {
     this.#mcpPool?.dispose();
     this.#mcpPool = null;
     this.#localTools.length = 0;
+    this.#localTools.push(...this.#baseLocalToolDefs);
     this.#mcpStatuses = [];
 
     const pluginsRoot = resolve(this.workspaceRoot, ".zmzai", "plugins");
@@ -270,11 +278,42 @@ export class EngineRuntime {
     return this.#mcpStatuses;
   }
 
+  /** 当前注入的本机工具 id（git + MCP），供诊断/测试。 */
+  localToolIds(): string[] {
+    return this.#localTools.map((def) => def.id);
+  }
+
+  /** 诊断直跑：按 runner 的调用形态执行一个已注入的本机工具
+   *  （zod 工具走 schema 校验，MCP 工具透传参数）。 */
+  async runLocalTool(id: string, args: Record<string, unknown>): Promise<{ title: string; output: string }> {
+    const def = this.#localTools.find((d) => d.id === id);
+    if (!def) throw new Error(`未注入本机工具：${id}`);
+    const ctxBase = {
+      sessionId: "ses_diagnostic",
+      userId: "local",
+      workspaceId: "local",
+      agent: "default",
+      toolCallId: `diag_${Date.now()}`,
+      workspace: createFsWorkspaceFiles({ root: this.workspaceRoot }),
+      sandbox: createSubprocessSandbox(),
+      emit: async () => undefined,
+    };
+    if ("parametersJsonSchema" in def) {
+      return def.execute(args as Record<string, unknown>, ctxBase as never);
+    }
+    const parsed = def.parameters.safeParse(args);
+    if (!parsed.success) {
+      throw new Error(`参数无效：${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+    }
+    return def.execute(parsed.data as never, ctxBase as never);
+  }
+
   /** 宿主退出时关停全部 MCP 子进程。 */
   dispose(): void {
     this.#mcpPool?.dispose();
     this.#mcpPool = null;
     this.#localTools.length = 0;
+    this.#localTools.push(...this.#baseLocalToolDefs);
   }
 }
 
