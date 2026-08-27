@@ -94,12 +94,30 @@ pool.dispose();
 console.log("[smoke] mcp ok:", pool.statuses[0].name, pool.statuses[0].tools.join(","));
 
 // Git 工具集（P0-2）：dist 导出可实例化且 id 齐全（执行已在框架单测覆盖）
-const { createGitTools } = await import("@zmzai/agent-framework");
+const { createGitTools, TerminalManager, createTerminalTools, createHostTerminalBackend } = await import("@zmzai/agent-framework");
 const gitDefs = createGitTools({ cwd: () => process.cwd() });
 if (gitDefs.map((d) => d.id).join() !== "git_status,git_diff,git_log,git_commit") {
   throw new Error("git 工具导出不完整：" + gitDefs.map((d) => d.id).join(","));
 }
 console.log("[smoke] git tools ok:", gitDefs.length);
+
+// 交互式终端（P0-2）：宿主后端实例化 + 工具 id 齐全 + 真会话一次往返
+const terminalManager = new TerminalManager(createHostTerminalBackend());
+const terminalTools = createTerminalTools(terminalManager, { workspaceRoot: () => process.cwd() });
+if (terminalTools.map((d) => d.id).join() !== "terminal_start,terminal_read,terminal_write,terminal_kill,terminal_list") {
+  throw new Error("终端工具导出不完整");
+}
+const ttySession = await terminalManager.start({ command: "echo harness_smoke_tty", cwd: process.cwd() });
+let ttyOut = "";
+for (let i = 0; i < 30; i++) {
+  await new Promise((r) => setTimeout(r, 100));
+  const r = terminalManager.read(ttySession.id);
+  ttyOut = r.output;
+  if (r.session.status !== "running") break;
+}
+if (!ttyOut.includes("harness_smoke_tty")) throw new Error("终端冒烟未读到输出：" + JSON.stringify(ttySession));
+console.log(`[smoke] terminal ok: backend=${ttySession.backend} status=${terminalManager.read(ttySession.id).session.status}`);
+terminalManager.disposeAll();
 
 console.log("[smoke] PASS");
 process.exit(0);

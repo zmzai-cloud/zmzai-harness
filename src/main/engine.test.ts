@@ -80,16 +80,36 @@ describe("expandPlaceholders / collectMcpEntries", () => {
     rt.dispose();
   });
 
-  it("构造时注入基线本地工具：git 四件绑定 workspaceRoot", () => {
+  it("构造时注入基线本地工具：git 四件 + 终端五件绑定 workspaceRoot", () => {
     const rt = makeRuntime();
     const ids = rt.localToolIds();
-    expect(ids).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
-    // MCP 重扫后 git 基线仍在
+    expect(ids.slice(0, 4)).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+    expect(ids.slice(4)).toEqual(["terminal_start", "terminal_read", "terminal_write", "terminal_kill", "terminal_list"]);
+    // MCP 重扫后基线仍在
     return rt.initMcpServers().then(() => {
-      expect(rt.localToolIds()).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+      expect(rt.localToolIds()).toHaveLength(9);
       rt.dispose();
     });
   });
+
+  it("终端端到端：start 启动真进程、read 读到输出并标注退出码", async () => {
+    const rt = makeRuntime();
+    const started = await rt.runLocalTool("terminal_start", { command: "echo terminal_e2e_ok" });
+    const meta = started.metadata as { sessionId: string };
+    expect(meta.sessionId).toMatch(/^tty_/);
+    // 轮询直到进程退出（退出态会在 read 输出里注明）
+    let output = "";
+    let status = "";
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const res = await rt.runLocalTool("terminal_read", { sessionId: meta.sessionId, since: 0 });
+      output = res.output;
+      status = (res.metadata as { status?: string }).status ?? "";
+      if (status !== "running") break;
+    }
+    expect(output).toContain("terminal_e2e_ok");
+    expect(status).toBe("exited");
+  }, 15_000);
 
   it("git_status 端到端：本机工具注入后可对真实仓库执行并读出变更", async () => {
     const { execFile } = await import("node:child_process");
@@ -109,7 +129,7 @@ describe("expandPlaceholders / collectMcpEntries", () => {
     }
     writeFileSync(join(ws, "notes.md"), "untracked\n");
     const rt = new EngineRuntime({ dataDir, workspaceRoot: ws });
-    expect(rt.localToolIds()).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
+    expect(rt.localToolIds().slice(0, 4)).toEqual(["git_status", "git_diff", "git_log", "git_commit"]);
 
     const res = await rt.runLocalTool("git_status", {});
     expect(res.output).toContain("分支");

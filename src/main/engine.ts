@@ -12,6 +12,9 @@ import {
   parseAgentPlugin,
   startMcpServers,
   createGitTools,
+  TerminalManager,
+  createTerminalTools,
+  createHostTerminalBackend,
   type AgentFramework,
   type AgentInfo,
   type SessionInfo,
@@ -57,8 +60,9 @@ export class EngineRuntime {
   /** 稳定引用的本地工具数组（git + MCP 工具注入点）：runner 每次 run 都会
    *  重读，所以 initMcpServers() 就地重置即可对下一次 prompt 生效。 */
   readonly #localTools: AnyToolDef[];
-  /** 基线本地工具（git 工具集，绑定本机 workspaceRoot）；MCP 重扫时保留。 */
+  /** 基线本地工具（git 工具集 + 终端工具，绑定本机 workspaceRoot）；MCP 重扫时保留。 */
   readonly #baseLocalToolDefs: AnyToolDef[];
+  readonly #terminalManager: TerminalManager;
   #mcpPool: McpPoolResult | null = null;
   #mcpStatuses: McpServerStatus[] = [];
 
@@ -69,8 +73,13 @@ export class EngineRuntime {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
 
-    // git 工具直接跑在本机真实仓库上（不是沙箱快照副本，否则 commit 会丢）
-    this.#baseLocalToolDefs = createGitTools({ cwd: () => this.workspaceRoot });
+    // git 工具直接跑在本机真实仓库上（不是沙箱快照副本，否则 commit 会丢）；
+    // 终端工具用宿主后端（node-pty 可用即真 PTY，否则管道模式）
+    this.#terminalManager = new TerminalManager(createHostTerminalBackend());
+    this.#baseLocalToolDefs = [
+      ...createGitTools({ cwd: () => this.workspaceRoot }),
+      ...createTerminalTools(this.#terminalManager, { workspaceRoot: () => this.workspaceRoot }),
+    ];
     this.#localTools = [...this.#baseLocalToolDefs];
 
     const store = createJsonlSessionStore({ dataDir: this.dataDir });
@@ -285,7 +294,7 @@ export class EngineRuntime {
 
   /** 诊断直跑：按 runner 的调用形态执行一个已注入的本机工具
    *  （zod 工具走 schema 校验，MCP 工具透传参数）。 */
-  async runLocalTool(id: string, args: Record<string, unknown>): Promise<{ title: string; output: string }> {
+  async runLocalTool(id: string, args: Record<string, unknown>): Promise<{ title: string; output: string; metadata?: Record<string, unknown> }> {
     const def = this.#localTools.find((d) => d.id === id);
     if (!def) throw new Error(`未注入本机工具：${id}`);
     const ctxBase = {
@@ -308,8 +317,9 @@ export class EngineRuntime {
     return def.execute(parsed.data as never, ctxBase as never);
   }
 
-  /** 宿主退出时关停全部 MCP 子进程。 */
+  /** 宿主退出时关停全部终端会话与 MCP 子进程。 */
   dispose(): void {
+    this.#terminalManager.disposeAll();
     this.#mcpPool?.dispose();
     this.#mcpPool = null;
     this.#localTools.length = 0;
