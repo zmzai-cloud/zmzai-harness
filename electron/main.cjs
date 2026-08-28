@@ -5,7 +5,7 @@
 // dev 模式：等待外部 dev server（pnpm dev 的 next dev）就绪。
 // 壳内不跑业务逻辑；本地引擎能力（MCP/终端/git，见 legacy/）保留为后续增强。
 
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -101,6 +101,17 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // 原生文件夹选择对话框（preload 暴露为 window.harnessNative.pickFolder）
+  ipcMain.handle("dialog:pickFolder", async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return null;
+    const res = await dialog.showOpenDialog(win, {
+      title: "选择项目文件夹",
+      properties: ["openDirectory"],
+    });
+    return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+
   ensureWebServer();
   await waitForWeb(WEB_URL);
   createWindow();

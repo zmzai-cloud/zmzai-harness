@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Navbar, navItemClass } from "@zmzai/theme";
 
+import ProjectSwitcher from "@/components/ProjectSwitcher";
 import SessionList from "@/components/SessionList";
 import ChatView from "@/components/ChatView";
-import Inspector from "@/components/Inspector";
+import WorkbenchPanel from "@/components/WorkbenchPanel";
+import SettingsDialog from "@/components/SettingsDialog";
 import ThemeToggle from "@/components/ThemeToggle";
 import { client } from "@/lib/client";
-import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus } from "@/lib/types";
+import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus, ModelRef } from "@/lib/types";
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
@@ -47,7 +49,8 @@ export default function App() {
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [selectedModel, setSelectedModel] = useState<ModelRef | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     void client.authStatus().then(setAuth);
@@ -110,11 +113,12 @@ export default function App() {
   const send = useCallback(
     async (text: string) => {
       if (!activeId || !text.trim()) return;
-      await client.prompt(activeId, text, activeAgent);
+      // per-prompt 模型覆盖：composer 选了模型则随本条消息下发，否则跟随代理默认
+      await client.prompt(activeId, text, activeAgent, selectedModel ?? undefined);
       // prompt 可能排队返回，刷新标题等元数据
       void client.listSessions().then(setSessions);
     },
-    [activeId, activeAgent],
+    [activeId, activeAgent, selectedModel],
   );
 
   const reply = useCallback(
@@ -130,19 +134,34 @@ export default function App() {
     if (activeId) void client.abort(activeId);
   }, [activeId]);
 
-  // 模型信息从 agent 配置取（relay 模型目录映射）
-  const activeModel = agents.find((a) => a.name === activeAgent)?.model;
-  const modelLabel = activeModel ? `${activeModel.providerId}/${activeModel.modelId}` : "default";
+  // 未选模型时展示代理默认模型（与 per-prompt 覆盖互不干扰）
+  const agentModel = agents.find((a) => a.name === activeAgent)?.model;
+  const modelLabel = selectedModel
+    ? `${selectedModel.providerId}/${selectedModel.modelId}`
+    : agentModel
+      ? `${agentModel.providerId}/${agentModel.modelId}`
+      : "default";
 
   return (
     <div className="flex h-full flex-col bg-bg text-ink">
-      {/* 品牌顶栏：全域统一 Navbar + 主题切换/登录/新建会话 */}
+      {/* 品牌顶栏：全域统一 Navbar + 主题/设置/登录/新建会话 */}
       <Navbar
         sublabel="harness"
         className="h-12"
         actions={
           <>
             <ThemeToggle />
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              title="设置（个人 key）"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <circle cx="8" cy="8" r="2.2" />
+                <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" strokeLinecap="round" />
+              </svg>
+            </button>
             {auth &&
               (auth.loggedIn ? (
                 <Badge variant="accent" size="sm">已登录 relay</Badge>
@@ -157,14 +176,13 @@ export default function App() {
           </>
         }
       >
-        <button type="button" onClick={() => setInspectorOpen((v) => !v)} className={navItemClass(false)}>
-          检查器
-        </button>
+        <span className={navItemClass(false)}>工作台</span>
       </Navbar>
 
-      {/* 主体：侧栏 + 对话 + 检查器 */}
+      {/* 主体：项目/会话侧栏 + 对话 + 产物侧工作台（审查/文件/画布/终端） */}
       <div className="flex min-h-0 flex-1">
         <SessionList
+          top={<ProjectSwitcher />}
           agents={agents}
           sessions={sessions}
           activeId={activeId}
@@ -176,15 +194,16 @@ export default function App() {
           events={events}
           status={status}
           pending={pending}
+          sessionId={activeId}
+          selectedModel={selectedModel}
+          onSelectModel={setSelectedModel}
           onSend={send}
           onReply={reply}
           onAbort={abort}
         />
-        {inspectorOpen && (
-          <div className="hidden w-72 shrink-0 min-[1000px]:block">
-            <Inspector />
-          </div>
-        )}
+        <div className="hidden w-96 shrink-0 min-[1180px]:block">
+          <WorkbenchPanel />
+        </div>
       </div>
 
       {/* 底部状态栏：低调一行 */}
@@ -194,8 +213,13 @@ export default function App() {
         <span className="text-line-strong">·</span>
         <span>agent: {activeAgent}</span>
         <span className="text-line-strong">·</span>
-        <span className="font-mono">model: {modelLabel}</span>
+        <span className="font-mono">
+          model: {modelLabel}
+          {selectedModel ? "（本会话消息覆盖）" : ""}
+        </span>
       </footer>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

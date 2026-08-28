@@ -1,14 +1,21 @@
 import type {
   AgentInfo,
   AuthStatus,
+  GitDiff,
   GitStatus,
   HarnessEvent,
+  KeyStatus,
   ModelRef,
+  ModelsState,
+  Project,
+  ProjectsState,
   SessionInfo,
+  SkillOption,
   TerminalChunk,
   TerminalSession,
   TranscriptMessage,
   TreeNode,
+  UsageInfo,
 } from "./types";
 
 /**
@@ -27,6 +34,13 @@ async function j<T>(res: Response): Promise<T> {
 const post = (path: string, body?: unknown) =>
   fetch(path, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+const send = (method: string, path: string, body?: unknown) =>
+  fetch(path, {
+    method,
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -83,6 +97,33 @@ export const client = {
 
   terminalKill: (id: string) =>
     fetch(`/api/terminal/${id}`, { method: "DELETE" }).then((r) => j<{ ok: boolean }>(r)),
+
+  // ===== 工作台（多项目 / 模型 / Skill / 上下文 / 审查 / key）=====
+
+  listProjects: () => fetch("/api/projects").then((r) => j<ProjectsState>(r)),
+
+  addProject: (path: string) => post("/api/projects", { path }).then((r) => j<{ project: Project }>(r)),
+
+  switchProject: (id: string) => send("PUT", "/api/projects", { id }).then((r) => j<{ project: Project }>(r)),
+
+  listModels: () => fetch("/api/models").then((r) => j<ModelsState>(r)),
+
+  listSkills: () => fetch("/api/skills").then((r) => j<{ skills: SkillOption[] }>(r)),
+
+  usage: (sessionId: string) =>
+    fetch(`/api/sessions/${sessionId}/usage`).then((r) => j<UsageInfo>(r)),
+
+  compact: (sessionId: string) =>
+    post(`/api/sessions/${sessionId}/compact`).then((r) => j<{ ok: boolean; reason?: string }>(r)),
+
+  gitDiff: (path?: string) =>
+    fetch(`/api/git/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`).then((r) => j<GitDiff>(r)),
+
+  keyStatus: () => fetch("/api/settings/key").then((r) => j<KeyStatus>(r)),
+
+  keySave: (key: string) => send("PUT", "/api/settings/key", { key }).then((r) => j<KeyStatus>(r)),
+
+  keyClear: () => fetch("/api/settings/key", { method: "DELETE" }).then((r) => j<KeyStatus>(r)),
 
   /** 订阅某会话事件流（SSE）。返回取消函数。 */
   subscribe: (sessionId: string, cb: (ev: HarnessEvent) => void) => {

@@ -87,3 +87,60 @@ export type TerminalChunk = {
   cursor: number;
   session: TerminalSession;
 };
+
+// ===== 工作台（多项目 / 模型选择 / Skill / 上下文 / 个人 key）=====
+
+export type Project = { id: string; name: string; path: string; createdAt: string };
+
+export type ProjectsState = { projects: Project[]; active: Project };
+
+/** relay /models 响应（透传归一，composer 选择器数据源）。 */
+export type FeaturedModel = {
+  id: string;
+  name: string;
+  description?: string;
+  channel: string;
+  maxInputTokens: number;
+};
+
+export type ModelChannel = {
+  id: string;
+  name: string;
+  models: { id: string; name: string; maxInputTokens: number }[];
+};
+
+export type ModelsState = {
+  models: { model: string; maxInputTokens: number }[];
+  modelSelectorData: { featured: FeaturedModel[]; channels: ModelChannel[] } | null;
+  authenticated: boolean;
+};
+
+export type SkillOption = { id: string; name: string; description?: string; markdown: string };
+
+/** 会话上下文用量：取最近一次 step-finish 的 input+output+cacheRead ≈ 窗口占用。 */
+export type UsageInfo = {
+  used: number;
+  contextWindow: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  steps: number;
+};
+
+export type DiffFile = { path: string; additions: number; deletions: number; binary?: boolean };
+
+export type GitDiff = { available: boolean; files: DiffFile[]; diff: string; truncated?: boolean };
+
+/** 个人 key 状态（仅掩码回显）。 */
+export type KeyStatus = { configured: boolean; masked: string | null; relayUrl?: string };
+
+/** Electron 宿主桥（preload.cjs 注入 window.harnessNative；Web 端不存在，需能力探测降级）。 */
+export type HarnessNativeBridge = {
+  pickFolder?: () => Promise<string | null>;
+};
+
+declare global {
+  interface Window {
+    harnessNative?: HarnessNativeBridge;
+  }
+}

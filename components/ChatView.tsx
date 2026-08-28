@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Markdown, MessageItem, PermissionCard, Reasoning, Textarea, ToolCard } from "@zmzai/theme";
-import type { HarnessEvent, Part, PermissionRequest } from "@/lib/types";
+import { Markdown, MessageItem, PermissionCard, Reasoning, ToolCard } from "@zmzai/theme";
+
+import type { HarnessEvent, ModelRef, Part, PermissionRequest } from "@/lib/types";
+import Composer from "./Composer";
 
 type UiMessage = { id: string; role: string; parts: Part[] };
 
@@ -81,50 +83,19 @@ function PartView({ part, markdown = false }: { part: Part; markdown?: boolean }
   }
 }
 
-function Composer({ onSend, onAbort, running }: { onSend: (t: string) => void; onAbort: () => void; running: boolean }) {
-  const [text, setText] = useState("");
-  const submit = () => {
-    if (!text.trim()) return;
-    onSend(text.trim());
-    setText("");
-  };
-  return (
-    <div className="flex items-end gap-2 border-t border-line bg-bg p-3">
-      <Textarea
-        className="h-11 flex-1 resize-none rounded-sm border border-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-ink"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        placeholder="给 Agent 下达任务…（⌘/Ctrl+Enter 发送）"
-      />
-      {running ? (
-        <Button variant="danger" size="md" onClick={onAbort}>
-          中止
-        </Button>
-      ) : (
-        <Button variant="primary" size="md" onClick={submit}>
-          发送
-        </Button>
-      )}
-    </div>
-  );
-}
-
 type Props = {
   events: HarnessEvent[];
   status: string;
   pending: PermissionRequest | null;
+  sessionId: string | null;
+  selectedModel: ModelRef | null;
+  onSelectModel: (m: ModelRef | null) => void;
   onSend: (t: string) => void;
   onReply: (r: "once" | "always" | "reject", feedback?: string) => void;
   onAbort: () => void;
 };
 
-export default function ChatView({ events, status, pending, onSend, onReply, onAbort }: Props) {
+export default function ChatView({ events, status, pending, sessionId, selectedModel, onSelectModel, onSend, onReply, onAbort }: Props) {
   const messages = useMemo(() => project(events), [events]);
   const running = status === "running";
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -183,7 +154,14 @@ export default function ChatView({ events, status, pending, onSend, onReply, onA
           />
         )}
       </div>
-      <Composer onSend={onSend} onAbort={onAbort} running={running} />
+      <Composer
+        sessionId={sessionId}
+        running={running}
+        selectedModel={selectedModel}
+        onSelectModel={onSelectModel}
+        onSend={onSend}
+        onAbort={onAbort}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Badge, cn } from "@zmzai/theme";
 import type { AgentInfo, SessionInfo } from "@/lib/types";
 
@@ -20,11 +20,13 @@ type Props = {
   sessions: SessionInfo[];
   activeId: string | null;
   activeAgent: string;
+  /** 顶部插槽（项目切换器）。 */
+  top?: ReactNode;
   onSelectAgent: (name: string) => void;
   onSelectSession: (id: string) => void;
 };
 
-export default function SessionList({ agents, sessions, activeId, activeAgent, onSelectAgent, onSelectSession }: Props) {
+export default function SessionList({ agents, sessions, activeId, activeAgent, top, onSelectAgent, onSelectSession }: Props) {
   const [query, setQuery] = useState("");
   // 标题/代理/模型任意字段命中即保留
   const filtered = query.trim()
@@ -34,6 +36,9 @@ export default function SessionList({ agents, sessions, activeId, activeAgent, o
     : sessions;
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+      {/* 项目切换器（关联本地文件夹） */}
+      {top}
+
       {/* Agent 选择 */}
       <div className="shrink-0 border-b border-line px-3 py-3">
         <div className="mb-2 px-1 text-[0.6875rem] font-semibold tracking-wide text-ink-3">代理</div>

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "@zmzai/theme/tokens";
 @import "@zmzai/theme/fonts";
+@import "@xterm/xterm/css/xterm.css";
 
 /* theme 组件源码参与 Tailwind 扫描（消费端三件套之二） */
 @source "../node_modules/@zmzai/theme/src/**/*.{ts,tsx}";
