@@ -1,36 +1,54 @@
 # zmzai-harness
 
-> **全新形态，以编程智能体为核心引擎，从想法到实现，轻松搞定。**
+> **Web / App 同构的 Agent 工作台**：浏览器（Web）与 Electron（App）加载同一套 Next.js 页面，推理走 relay 云端，执行在本机沙箱。
 
-Electron 桌面端 Agent 工作台：你给一句想法，内置编程智能体（`@zmzai/agent-framework`）在本机完成规划、编码、执行、自检与交付。
+你给一句想法，内置编程智能体（`@zmzai/agent-framework`）在云端推理、在本机沙箱完成文件读写 / 命令执行 / git 操作并交付；旧版 Electron 本地引擎（MCP 等剩余能力）保留为 App 增强（见 `legacy/`）。
+
+## 形态与同构架构
+
+```
+浏览器 (Web)  ─┐                    ┌─→ relay (m.zmzai.cloud)  ─→  OpenAI 兼容模型
+               ├─ HTTP / SSE ─→  Next.js (3100)      ─┤   （cookie 透传鉴权）
+Electron (App) ┘  同一套页面           │
+                                    └─→ muzhi (muzhi.zmzai.cloud)  登录 / 会话配额
+```
+
+- **一份代码，两个入口**：`app/` + `components/` + `lib/` 是唯一 UI；浏览器直接访问 `http://127.0.0.1:3100`，App 由 `electron/main.cjs` 壳加载同一 URL（`pnpm dev:app`）。页面完全一致，无需平台分支。
+- **推理云端 + 执行本机**：服务端 `lib/runtime.ts` 跑 agent-framework 运行时（JSONL 会话存储 + 内存事件总线），推理全走 relay；登录 cookie 经 `AsyncLocalStorage` 请求级透传（`lib/request-cookie.ts`），模型目录由 relay 下发（默认 `deepseek-chat`）。执行环境为本机沙箱：builtin 文件工具（read/write/edit/glob/grep）直接落 `ZMZAI_WORKSPACE`（默认 `./.workspace`），bash 走本机子进程沙箱（程序白名单），git / 终端工具绑定本机工作区（与 legacy 引擎同策略）。
+- **实时事件流**：`/api/sessions/[id]/events` SSE 推送（`session.status` / `message.part.delta` / 授权询问），UI 的 `client.subscribe` 订阅渲染，跨会话历史从 JSONL 转录恢复。
+- **App 增强（后续）**：旧版 Electron 本地引擎（MCP 插件池等剩余能力）完整保留在 `legacy/`，通过 `window.harnessNative` 渐进增强接入（App 多入口、Web 隐藏），详见 `legacy/README.md`。
+- **品牌图标**：Web favicon（`app/icon.png`，Next 自动识别）与 Electron/dmg 图标（`build/icon.png` → 自动转 icns）同源 @zmzai/theme 定案资产（荧光绿底白云，512px）。
+- **桌面打包**：`pnpm build:mac` 产出 dmg/zip（arm64）；打包应用内嵌 Next standalone 服务（`electron/main.cjs` 自动拉起 `node .next/standalone/server.js`），会话与工作区落系统用户数据目录，双击即用。
 
 ## 能力一览
 
-- **多 Agent**：default / readonly / explore / general 内置预设 + 工作区 `.zmzai/agents/*.md` 自定义 Agent
-- **权限与审批**：读写/执行/联网/git/终端 分类授权，可「总是允许」沉淀规则，桌面弹窗审批
-- **本机工具基线**（16 个，绑定工作区）：
-  - 文件 read/glob/grep/write/edit
-  - 沙箱 bash + 产物面板联动
-  - git_status / git_diff / git_log / git_commit（真实仓库执行）
-  - terminal_start / read / write / kill / list（真 PTY，node-pty 不可用自动降级管道）
-  - webfetch / websearch（Tavily/Serper/DuckDuckGo 三后端）
-  - apply_patch（unified diff 多文件两阶段应用）、todo、task 子代理、qa-check
-- **MCP 插件生态**：信任安装 Agent Plugins 1.0 包；stdio / streamable-http / sse 三传输自动连接，工具注入下一轮对话
-- **跨会话恢复**：JSONL 转录持久化，重开会话完整还原历史
+- **多 Agent**：agent 名来自 relay 模型目录（如 `deepseek-chat`）；工作区 `.zmzai/agents/*.md` 自定义 Agent 自动加载
+- **权限与审批**：工具授权分类（读写/执行/联网/git/终端），「总是允许」沉淀规则，UI 内确认弹窗
+- **本机沙箱执行**：bash 子进程沙箱（程序白名单 `EXEC_ALLOWED_PROGRAMS` 可配）+ 本机工作区文件工具，产物/版本可追溯（`file.edited` 事件 + `.fw-revisions.json`）
+- **跨会话恢复**：JSONL 转录持久化（`data/`），重开会话完整还原历史 + 实时事件缓冲合并
+- **登录**：`/login` 页 email+password → 代理 muzhi 登录（透传 `Set-Cookie`），`/api/auth/status` 校验会话
 
 ## 开发
 
 ```bash
-corepack pnpm install        # 首次或 @zmzai/agent-framework 有更新后必跑（file: 依赖是安装期拷贝）
-corepack pnpm dev            # Electron 开发模式
+corepack pnpm install        # 首次或 @zmzai/agent-framework / @zmzai/theme 更新后必跑（file: 依赖是安装期拷贝）
+corepack pnpm dev            # Web（next dev -p 3100）+ Electron 壳 同时启动
+corepack pnpm dev:web        # 仅浏览器模式 http://127.0.0.1:3100
+corepack pnpm dev:app        # 仅 Electron 壳（自动等待 Web 就绪）
+corepack pnpm typecheck      # tsc --noEmit
 corepack pnpm test           # vitest 单测
-node e2e/smoke.mjs           # headless 引擎冒烟（MCP/git/PTY 真实链路）
-corepack pnpm build          # electron-vite 构建
-pnpm rebuild:native          # 打包前若 node-pty ABI 报错时执行（prebuilds 常态无需）
+corepack pnpm build          # next build（Electron 壳可加载生产构建）
+corepack pnpm build:mac      # 打包 macOS dmg + zip（arm64，产物在 dist/）
 ```
 
-环境变量见 `.env.example`：`OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL`、可选 `TAVILY_API_KEY`/`SERPER_API_KEY` 提升搜索质量、`ZMZAI_WORKSPACE`/`ZMZAI_DATA_DIR` 自定义路径。
+### 环境（默认接正式环境）
+
+`.env` 默认连正式环境（用户只有一个环境，dev 即用生产）：`OPENAI_BASE_URL=https://m.zmzai.cloud/api/v1`（relay 推理/模型目录）+ `MUZHI_URL=https://muzhi.zmzai.cloud`（登录）。本地调试可切回 `http://127.0.0.1:3003` / `http://127.0.0.1:3000`（需自起 mongod 27017 / muzhi / relay）。会话持久化 `ZMZAI_DATA_DIR`（默认 `./.harness-data`）、Agent 工作区 `ZMZAI_WORKSPACE`（默认 `./.workspace`）；打包应用内两者自动重定向到系统用户数据目录。
+
+### macOS 打包（scripts/build-mac.sh）
+
+流程：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/zmzai Harness-0.2.0-arm64.dmg` + zip。
 
 ## 相关仓库
 
-`zmzai-agent`（agent-framework 核心）· `docs/harness-gap-analysis.md`（对标 opencode/pi/gemini-cli/codex/deepseek-harness 的差距路线图，P0–P3 推进状态实时更新）。
+`zmzai-agent`（agent-framework 核心）· `zmzai-relay`（模型目录/推理/计费）· `zmzai-theme`（设计系统三件套）。

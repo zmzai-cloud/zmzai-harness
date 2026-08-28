@@ -1,42 +1,70 @@
 {
   "name": "zmzai-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "zmzai Agent Harness — 本地 Agent 工作台（Electron 桌面 GUI，基于 @zmzai/agent-framework）",
+  "description": "zmzai Agent Harness — Web / Desktop 同构的 Agent 工作台（Next.js 单页 + Electron 壳）",
+  "main": "electron/main.cjs",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "out/main/index.js",
   "scripts": {
-    "dev": "NODE_OPTIONS= electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "postinstall": "bash scripts/fix-node-pty-perms.sh",
-    "rebuild:native": "electron-rebuild -f -w node-pty",
+    "dev": "concurrently -k -n web,app -c cyan,magenta \"next dev -p 3100\" \"wait-on http://127.0.0.1:3100 && electron electron/main.cjs\"",
+    "dev:web": "next dev -p 3100",
+    "dev:app": "wait-on http://127.0.0.1:3100 && electron electron/main.cjs",
+    "build": "next build",
+    "start": "next start -p 3100",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:mac": "bash scripts/build-mac.sh"
   },
   "dependencies": {
     "@zmzai/agent-framework": "file:../zmzai-agent/packages/agent-framework",
-    "node-pty": "^1.1.0"
+    "@zmzai/theme": "file:../zmzai-theme",
+    "next": "15.5.21",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwindcss": "4.3.3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0",
-    "@types/node": "^22.10.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "concurrently": "^9.2.1",
     "electron": "^33.2.0",
-    "electron-vite": "^2.3.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.9"
+    "electron-builder": "^26.0.12",
+    "typescript": "5.9.3",
+    "vitest": "^2.1.9",
+    "wait-on": "^8.0.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron"
     ]
   },
-  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "build": {
+    "appId": "cloud.zmzai.harness",
+    "productName": "zmzai Harness",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      ".env",
+      "electron/**",
+      ".next/standalone/**",
+      "!.next/standalone/.next/cache/**"
+    ],
+    "asar": false,
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true
+    }
+  }
 }

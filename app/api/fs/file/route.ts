@@ -1,0 +1,32 @@
+import { readFile, stat } from "node:fs/promises";
+
+import { NextResponse, type NextRequest } from "next/server";
+
+import { resolveWithinWorkspace } from "@/lib/paths";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const MAX_BYTES = 512 * 1024;
+
+/** GET /api/fs/file?path=README.md — 读取工作区内文本文件预览（限 512KB） */
+export async function GET(request: NextRequest) {
+  const rel = request.nextUrl.searchParams.get("path");
+  if (!rel) return NextResponse.json({ error: "缺少 path 参数" }, { status: 400 });
+  try {
+    const abs = resolveWithinWorkspace(rel);
+    const st = await stat(abs);
+    if (st.isDirectory()) return NextResponse.json({ error: "目标是目录" }, { status: 400 });
+    if (st.size > MAX_BYTES) {
+      return NextResponse.json({ error: `文件过大（${Math.round(st.size / 1024)}KB > 512KB），请用终端查看` }, { status: 400 });
+    }
+    const buf = await readFile(abs);
+    // 简易二进制嗅探：出现 NUL 字节判定为二进制，不硬塞进 JSON
+    if (buf.includes(0)) {
+      return NextResponse.json({ error: "二进制文件不支持预览" }, { status: 400 });
+    }
+    return NextResponse.json({ path: rel, size: st.size, content: buf.toString("utf8") });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "读取文件失败" }, { status: 400 });
+  }
+}

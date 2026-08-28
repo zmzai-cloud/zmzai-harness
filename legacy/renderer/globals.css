@@ -1,0 +1,47 @@
+/* zmzai Agent Harness — 对齐 @zmzai/theme 全品牌体系（纯白 + 荧光绿 + MiSans） */
+@import "tailwindcss";
+@import "@zmzai/theme/tokens";
+@import "@zmzai/theme/fonts";
+@source "../node_modules/@zmzai/theme/src/**/*.{ts,tsx}";
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* 消息区允许选中文本 */
+.messages,
+.messages * {
+  user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-3);
+}
