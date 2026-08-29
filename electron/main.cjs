@@ -50,8 +50,11 @@ function ensureWebServer() {
       NODE_ENV: "production",
       PORT: String(WEB_PORT),
       HOSTNAME: "127.0.0.1",
-      // 覆盖相对路径：打包后 cwd 是 asar（只读），会话与工作区必须落用户目录
+      // 覆盖相对路径：打包后 cwd 是 asar（只读），会话与工作区必须落用户目录。
+      // HARNESS_DATA_DIR / HARNESS_WORKSPACE 是 lib/runtime-constants 实际读取的变量；
+      // ZMZAI_* 为兼容别名保留（勿只写 ZMZAI_*：旧版曾因此把数据写进 app 包内）
       ZMZAI_DATA_DIR: path.join(userData, "data"),
+      HARNESS_DATA_DIR: path.join(userData, "data"),
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
       HARNESS_WORKSPACE: path.join(userData, "workspace"),
     },

@@ -5,6 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "==> [0/5] 清理历史打包产物（避免 dist 累积旧版本 dmg/zip）"
+bash scripts/clean-dist.sh
+
 echo "==> [1/5] next build（生产构建，含 standalone 输出）"
 pnpm build
 
