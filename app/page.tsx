@@ -11,7 +11,7 @@ import ChatView from "@/components/ChatView";
 import WorkbenchPanel from "@/components/WorkbenchPanel";
 import AccountBlock from "@/components/AccountBlock";
 import { client } from "@/lib/client";
-import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus, ModelRef, ThinkingEffort } from "@/lib/types";
+import type { SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus, ModelRef, ThinkingEffort } from "@/lib/types";
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
@@ -49,10 +49,10 @@ function PaletteBridge({ bridge, action }: { bridge: React.RefObject<{ newSessio
 
 export default function App() {
   const router = useRouter();
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [activeAgent, setActiveAgent] = useState<string>("default");
+  // 侧栏已去代理分组：会话固定用 default agent，模型选择交给底部 Composer（默认推荐）
+  const activeAgent = "default";
   const [events, setEvents] = useState<HarnessEvent[]>([]);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
@@ -100,14 +100,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void client.listAgents().then((list) => {
-      setAgents(list);
-      // 云端模式 agent 名来自 relay 模型目录（如 deepseek-chat），
-      // 默认选中第一个；若当前选中已失效则自动切回
-      if (list.length > 0) {
-        setActiveAgent((prev) => (list.some((a) => a.name === prev) ? prev : list[0].name));
-      }
-    });
     void client.listSessions().then(setSessions);
   }, [auth?.loggedIn]);
 
@@ -249,13 +241,10 @@ export default function App() {
     { id: "open-settings", label: "打开设置", hint: "个人 key / relay / MCP / 插件", run: () => router.push("/settings") },
   ];
 
-  // 未选模型时展示代理默认模型（与 per-prompt 覆盖互不干扰）
-  const agentModel = agents.find((a) => a.name === activeAgent)?.model;
+  // 模型标签：选中（含 Composer 默认推荐）展示之，否则 fallback
   const modelLabel = selectedModel
     ? `${selectedModel.providerId}/${selectedModel.modelId}`
-    : agentModel
-      ? `${agentModel.providerId}/${agentModel.modelId}`
-      : "default";
+    : "默认模型";
 
   return (
     <div className="flex h-full flex-col bg-bg text-ink">
@@ -306,13 +295,10 @@ export default function App() {
         <SessionList
           top={<ProjectSwitcher />}
           bottom={<AccountBlock />}
-          agents={agents}
           sessions={sessions}
           activeId={activeId}
-          activeAgent={activeAgent}
           onNewSession={() => void newSession()}
           canCreate={!!auth?.loggedIn}
-          onSelectAgent={setActiveAgent}
           onSelectSession={setActiveId}
           onRenameSession={(id, title) => void renameSession(id, title)}
           onDeleteSession={(id) => void deleteSession(id)}
@@ -351,8 +337,6 @@ export default function App() {
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[0.6875rem] text-ink-3">
         <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "animate-pulse bg-accent-strong" : "bg-ink-3"}`} />
         <span>{statusLabel(status)}</span>
-        <span className="text-line-strong">·</span>
-        <span>agent: {activeAgent}</span>
         <span className="text-line-strong">·</span>
         <span className="font-mono">
           model: {modelLabel}

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { cn } from "@zmzai/theme";
-import type { AgentInfo, SessionInfo } from "@/lib/types";
+import type { SessionInfo } from "@/lib/types";
 
 function timeLabel(iso?: string): string {
   if (!iso) return "";
@@ -16,10 +16,8 @@ function timeLabel(iso?: string): string {
 }
 
 type Props = {
-  agents: AgentInfo[];
   sessions: SessionInfo[];
   activeId: string | null;
-  activeAgent: string;
   /** 顶部插槽（项目切换器）。 */
   top?: ReactNode;
   /** 底部插槽（账户块）。 */
@@ -28,13 +26,12 @@ type Props = {
   onNewSession?: () => void;
   /** 新建会话是否可用（未登录 relay 时禁用）。 */
   canCreate?: boolean;
-  onSelectAgent: (name: string) => void;
   onSelectSession: (id: string) => void;
   onRenameSession: (id: string, title: string) => void;
   onDeleteSession: (id: string) => void;
 };
 
-export default function SessionList({ agents, sessions, activeId, activeAgent, top, bottom, onNewSession, canCreate, onSelectAgent, onSelectSession, onRenameSession, onDeleteSession }: Props) {
+export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, onSelectSession, onRenameSession, onDeleteSession }: Props) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,28 +65,6 @@ export default function SessionList({ agents, sessions, activeId, activeAgent, t
           </button>
         </div>
       )}
-
-      {/* 代理 */}
-      <div className="shrink-0 px-2 pt-3">
-        <div className="px-2 pb-1.5 text-[0.6875rem] font-semibold tracking-wide text-ink-3">代理</div>
-        <div className="flex flex-wrap gap-1 px-1">
-          {agents.length === 0 && <span className="px-1 text-xs text-ink-3">未发现代理</span>}
-          {agents.map((a) => (
-            <button
-              key={a.name}
-              onClick={() => onSelectAgent(a.name)}
-              className={cn(
-                "rounded-pill px-2.5 py-1 text-xs font-medium transition-colors",
-                activeAgent === a.name
-                  ? "bg-ink text-paper"
-                  : "text-ink-2 hover:bg-surface-2 hover:text-ink",
-              )}
-            >
-              {a.name}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* 会话列表：节头（标题 + 搜索切换） + 列表 */}
       <div className="flex min-h-0 flex-1 flex-col pt-3">

@@ -52,8 +52,10 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   const [effort, setEffort] = useState<ThinkingEffort>("off");
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [compacting, setCompacting] = useState(false);
-  // 图片附件（P2-11）：data URL 随 prompt 下发，framework 多模态输入
+  // 图片附件（P2-11）：data URL 随 prompt 下发，framework 多模态输入；
+  // imgNotice：选图/粘贴被拒的短暂提示（超限、非图片）
   const [images, setImages] = useState<{ url: string; mediaType: string; name: string }[]>([]);
+  const [imgNotice, setImgNotice] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -153,6 +155,18 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     }
     return out;
   }, [models]);
+
+  // 默认推荐模型（需求：侧栏去代理后，底部选择器默认选一个稳定模型）：
+  // 优先 deepseek-v4-flash，否则第一个可路由模型；只在用户未手动选择时生效一次。
+  const defaultModelApplied = useRef(false);
+  useEffect(() => {
+    if (defaultModelApplied.current || selectedModel) return;
+    const routable = modelChoices.filter((m) => m.routable);
+    if (routable.length === 0) return;
+    const pick = routable.find((m) => m.id === "deepseek-v4-flash") ?? routable[0]!;
+    defaultModelApplied.current = true;
+    onSelectModel({ providerId: "openai", modelId: pick.id });
+  }, [modelChoices, selectedModel, onSelectModel]);
   // 弹层内搜索过滤（模型可能很多）
   const [modelFilter, setModelFilter] = useState("");
   const shownModels = useMemo(() => {
@@ -182,10 +196,19 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     setAtQuery(parseAtQuery(value, caret));
   }, []);
 
+  /** 已知不支持视觉输入的模型前缀（deepseek 官方 API 对 image content 直接 400，
+   *  上游报错/挂起表现为会话「卡住」，发送前拦截）。 */
+  const VISION_UNSAFE = /^(deepseek|o3-mini|gpt-4o-mini)/i;
+  const currentModelId = selectedModel?.modelId ?? "deepseek-v4-flash";
+
   const submit = useCallback(() => {
     const body = text.trim();
     // 无会话也可发送（page.send 会自动建会话）
     if (!body && images.length === 0) return;
+    if (images.length > 0 && VISION_UNSAFE.test(currentModelId)) {
+      setImgNotice(`${currentModelId} 不支持图片输入，请点击底部模型名切换（如 gpt-5.6-*）`);
+      return;
+    }
     let full = body || "（见附件图片）";
     if (skill) {
       full += `\n\n---\n\n<skill name="${skill.name}">\n${skill.markdown}\n</skill>`;
@@ -204,13 +227,19 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     setSkill(null);
     setAtQuery(null);
     setImages([]);
-  }, [text, sessionId, skill, onSend, images, effort]);
+  }, [text, sessionId, skill, onSend, images, effort, currentModelId]);
 
-  /** 本地选图 → data URL（限 4MB/张，最多 4 张）。 */
-  const pickImages = useCallback((files: FileList | null) => {
+  /** 本地选图 → data URL（限 4MB/张，最多 4 张）。被拒时给短暂提示（不再静默丢）。 */
+  const pickImages = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
-    for (const file of [...files].slice(0, 4)) {
-      if (!file.type.startsWith("image/") || file.size > 4 * 1024 * 1024) continue;
+    const list = [...files];
+    let skipped = 0;
+    for (const file of list.slice(0, 4)) {
+      if (!file.type.startsWith("image/")) { skipped += 1; continue; }
+      if (file.size > 4 * 1024 * 1024) {
+        setImgNotice(`「${file.name}」超过 4MB，未添加`);
+        continue;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         setImages((prev) =>
@@ -221,7 +250,26 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       };
       reader.readAsDataURL(file);
     }
+    if (skipped > 0) setImgNotice(`${skipped} 个非图片文件未添加`);
   }, []);
+
+  // 粘贴图片：剪贴板里的图片文件直接进附件（与选图同一 4MB/张限制）
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return; // 纯文本粘贴走默认行为
+      e.preventDefault();
+      pickImages(files);
+    },
+    [pickImages],
+  );
+
+  // 提示自动消失
+  useEffect(() => {
+    if (!imgNotice) return;
+    const t = setTimeout(() => setImgNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [imgNotice]);
 
   const compact = useCallback(async () => {
     if (!sessionId || compacting) return;
@@ -485,6 +533,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         )}
         <Textarea
           ref={textareaRef}
+          onPaste={onPaste}
           className="max-h-44 min-h-[52px] w-full resize-none border-0 bg-transparent px-3.5 py-3 text-sm text-ink shadow-none outline-none placeholder:text-ink-3 focus-visible:ring-0"
           value={text}
           onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
@@ -518,8 +567,10 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             e.preventDefault();
             submit();
           }}
-          placeholder="给 Agent 下达任务…"
+          placeholder="给 Agent 下达任务…（可直接粘贴图片）"
         />
+        {/* 选图/粘贴/发图拦截的短暂提示（4s 自动消失） */}
+        {imgNotice && <p className="px-3.5 pb-1 text-xs text-warning">{imgNotice}</p>}
         {/* 图片选择（隐藏 input，回形针触发） */}
         <input
           ref={fileRef}
