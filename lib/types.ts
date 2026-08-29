@@ -48,8 +48,8 @@ export type PermissionRequest = {
 
 export type HarnessEvent = { type: string; data: unknown };
 
-/** 会话已持久化的转录（来自引擎 getMessages）。info 仅用 id/role，parts 即完整片段。 */
-export type TranscriptMessage = { info: { id: string; role: string }; parts: Part[] };
+/** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
+export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string } }; parts: Part[] };
 
 export type AuthStatus = {
   loggedIn: boolean;

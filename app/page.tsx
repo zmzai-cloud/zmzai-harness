@@ -18,7 +18,7 @@ import type { SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, A
 function transcriptToEvents(messages: TranscriptMessage[]): HarnessEvent[] {
   const out: HarnessEvent[] = [];
   for (const m of messages) {
-    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role } } });
+    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role, ...(m.info.error ? { error: m.info.error } : {}) } } });
     for (const p of m.parts) {
       out.push({ type: "message.part.updated", data: { part: p } });
     }

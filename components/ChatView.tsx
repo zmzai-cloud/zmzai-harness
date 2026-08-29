@@ -10,14 +10,14 @@ export type TodoItem = { content: string; status: "pending" | "in_progress" | "c
 type SubagentStep = { tool: string; title?: string; state?: string };
 type SubagentActivity = { steps: SubagentStep[]; finished?: { state: string; durationMs?: number; toolCalls?: number } };
 type UiPart = { part: Part; diff?: string; subagent?: SubagentActivity };
-type UiMessage = { id: string; role: string; parts: UiPart[] };
+type UiMessage = { id: string; role: string; parts: UiPart[]; error?: { name: string; message: string } };
 
 /** 把事件流投影成消息树：message.updated 建壳，part.updated 定稿，part.delta 增量文本。
  *  file.edited（引擎在 write/edit 落盘时发出，带现成 unified diff）按 path 挂到
  *  对应的 edit/write 工具调用上，渲染为内联 diff 卡片。
  *  同时收集 read 工具读取过的文件（去重，最新在前）→ 上下文读取 pill 列表。 */
 function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoItem[] | null; reads: string[] } {
-  const messages = new Map<string, { id: string; role: string; parts: Map<string, UiPart> }>();
+  const messages = new Map<string, { id: string; role: string; parts: Map<string, UiPart>; error?: { name: string; message: string } }>();
   const order: string[] = [];
   // 未消费的 file.edited：path → diff 队列（事件序在前，tool part 定稿在后）
   const pendingEdits = new Map<string, string[]>();
@@ -28,9 +28,13 @@ function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoIt
   const reads: string[] = [];
   for (const ev of events) {
     if (ev.type === "message.updated") {
-      const m = (ev.data as { message: { id: string; role: string } }).message;
-      if (!messages.has(m.id)) {
-        messages.set(m.id, { id: m.id, role: m.role, parts: new Map() });
+      const m = (ev.data as { message: { id: string; role: string; error?: { name: string; message: string } } }).message;
+      const existing = messages.get(m.id);
+      if (existing) {
+        // 失败收尾会补发带 error 的 message.updated——保留最新错误供 UI 展示
+        if (m.error) existing.error = m.error;
+      } else {
+        messages.set(m.id, { id: m.id, role: m.role, parts: new Map(), ...(m.error ? { error: m.error } : {}) });
         order.push(m.id);
       }
     } else if (ev.type === "message.part.updated") {
@@ -89,7 +93,7 @@ function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoIt
   return {
     messages: order.map((id) => {
       const m = messages.get(id)!;
-      return { id: m.id, role: m.role, parts: [...m.parts.values()] };
+      return { id: m.id, role: m.role, parts: [...m.parts.values()], ...(m.error ? { error: m.error } : {}) };
     }),
     todos,
     reads: reads.slice(0, 8),
@@ -418,14 +422,25 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
           const isAssistant = m.role === "assistant";
           const lastActive = isAssistant && idx === messages.length - 1 && running;
           if (!isAssistant) {
-            // IDE 式用户消息：右侧浅色圆角气泡 + hover 操作（复制/编辑回填）
+            // IDE 式用户消息：右侧浅色圆角气泡（含图片附件内联展示） + hover 操作（复制/编辑回填）
             const text = m.parts
               .map((p) => (p.part.type === "text" ? p.part.text : ""))
               .join("");
+            const imageParts = m.parts.filter((p) => p.part.type === "image" && p.part.url);
             return (
               <div key={m.id} className="group flex justify-end">
                 <div className="relative max-w-[85%]">
                   <div className="whitespace-pre-wrap rounded-lg rounded-br-sm bg-surface-2 px-3.5 py-2.5 text-[0.875rem] leading-[1.65] text-ink">
+                    {imageParts.length > 0 && (
+                      <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+                        {imageParts.map((p) =>
+                          p.part.type === "image" ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img key={p.part.id} src={p.part.url} alt="附件图片" className="max-h-48 rounded-md border border-line" />
+                          ) : null,
+                        )}
+                      </div>
+                    )}
                     {text}
                   </div>
                   <div className="absolute -left-14 top-1 hidden items-center gap-0.5 group-hover:flex">
@@ -461,6 +476,11 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
               {m.parts.map((p, i) => (
                 <PartView key={i} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} subagent={p.subagent} />
               ))}
+              {m.error && (
+                <div className="rounded-sm border border-danger/40 bg-danger/5 px-3 py-2 text-xs leading-5 text-danger">
+                  上游请求失败（{m.error.name}）：{m.error.message}
+                </div>
+              )}
               {lastActive && (
                 <div className="flex items-center gap-1.5 pt-0.5 text-[0.6875rem] text-accent-strong">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-strong" />
