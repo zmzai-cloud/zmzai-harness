@@ -1,15 +1,13 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import { resolve } from "node:path";
 import {
-  createServer,
+  createAgentRuntime,
   createSqliteSessionStore,
   createMemoryEventLog,
   createOpenAiModelProvider,
   createFsWorkspaceFiles,
-  createSubprocessSandbox,
   createGitTools,
   createTerminalTools,
-  createRepoMapTool,
   createHostTerminalBackend,
   loadCustomAgents,
   startMcpServers,
@@ -148,10 +146,10 @@ export function runtimeFor(projectPath: string): AgentFramework {
 
   // git 工具直接跑本机真实仓库（沙箱快照是隔离副本，git 操作会丢上下文）；
   // 终端工具用宿主后端（node-pty 可用即真 PTY，否则降级管道模式）。
+  // repo_map（R1）由 createAgentRuntime 能力接线自动注入，不再手工注册。
   const baseLocalTools = [
     ...createGitTools({ cwd: () => activeWorkspaceRoot() }),
     ...createTerminalTools(terminalManager(), { workspaceRoot: () => activeWorkspaceRoot() }),
-    createRepoMapTool({ workspaceRoot: () => activeWorkspaceRoot() }),
   ];
   // MCP 装配采用就地重置：数组引用稳定（runner 每次 run 重读 deps.localTools），
   // MCP server 连接完成后替换内容，下一次 prompt 即带上 mcp__server__tool。
@@ -187,27 +185,31 @@ export function runtimeFor(projectPath: string): AgentFramework {
     modelId: process.env.OPENAI_MODEL ?? "gpt-4o",
   };
 
-  const runtime = createServer({
+  const runtime = createAgentRuntime({
     // SQLite 存储升级（N4）：单文件 zmzai.db 替代多文件 JSONL；首次自动导入旧数据
     store: createSqliteSessionStore({ dataDir: dir }),
     eventLog: createMemoryEventLog(),
     modelProvider: provider,
-    // 本机工作区：builtin 的 read/write/edit/glob/grep 直接落在工作区
-    workspaceFor: () => createFsWorkspaceFiles({ root: projectPath }),
+    // 本机工作区：builtin 的 read/write/edit/glob/grep 直接落在工作区；
+    // repo_map 能力（R1）随 fs 工作区默认开启
+    workspace: { kind: "fs", root: projectPath },
     // 本机子进程沙箱：bash 工具在本机执行（程序白名单，产物回传）
     // 快照从当前项目工作区采集、新产物回写（函数形式随项目切换即时生效）
-    sandbox: createSubprocessSandbox({ workspaceRoot: () => activeWorkspaceRoot() }),
+    sandbox: { kind: "subprocess", workspaceRoot: () => activeWorkspaceRoot() },
     localTools,
+    capabilities: { repoMap: { workspaceRoot: () => activeWorkspaceRoot() }, subagents: 1 },
     // 自动上下文压缩（spec §8.3）：摘要模型沿用主模型，接近窗口时折叠
-    compaction: {
-      enabled: true,
-      contextWindow: contextWindowFor(),
-      summaryModel: provider.getModel(summaryModelRef),
-    },
-    // 工作区 .zmzai/agents/*.md 自定义 Agent（与 legacy 引擎一致）
-    loadWorkspaceAgents: async () => {
-      const { agents } = await loadCustomAgents(createFsWorkspaceFiles({ root: projectPath }));
-      return agents;
+    runnerOptions: {
+      compaction: {
+        enabled: true,
+        contextWindow: contextWindowFor(),
+        summaryModel: provider.getModel(summaryModelRef),
+      },
+      // 工作区 .zmzai/agents/*.md 自定义 Agent（与 legacy 引擎一致）
+      loadWorkspaceAgents: async () => {
+        const { agents } = await loadCustomAgents(createFsWorkspaceFiles({ root: projectPath }));
+        return agents;
+      },
     },
   });
   cache.set(projectPath, runtime);
