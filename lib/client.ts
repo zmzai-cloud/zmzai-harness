@@ -5,14 +5,18 @@ import type {
   GitStatus,
   HarnessEvent,
   KeyStatus,
+  McpStatuses,
   ModelRef,
   ModelsState,
+  PluginInfo,
   Project,
+  RelayKeyInfo,
   ProjectsState,
   SessionInfo,
   SkillOption,
   TerminalChunk,
   TerminalSession,
+  ThinkingEffort,
   TranscriptMessage,
   TreeNode,
   UsageInfo,
@@ -48,6 +52,8 @@ const send = (method: string, path: string, body?: unknown) =>
 export const client = {
   authStatus: () => fetch("/api/auth/status").then((r) => j<AuthStatus>(r)),
 
+  authLogout: () => post("/api/auth/logout").then((r) => j<{ ok: boolean }>(r)),
+
   login: (email: string, password: string) =>
     post("/api/auth/login", { email, password }).then((r) => j<{ error?: string }>(r)),
 
@@ -58,11 +64,23 @@ export const client = {
   createSession: (agent?: string, model?: ModelRef) =>
     post("/api/sessions", { agent, model }).then((r) => j<SessionInfo>(r)),
 
+  renameSession: (sessionId: string, title: string) =>
+    send("PATCH", `/api/sessions/${sessionId}`, { title }).then((r) => j<{ ok?: boolean; error?: string }>(r)),
+
+  deleteSession: (sessionId: string) =>
+    send("DELETE", `/api/sessions/${sessionId}`).then((r) => j<{ ok?: boolean; error?: string }>(r)),
+
   getMessages: (sessionId: string) =>
     fetch(`/api/sessions/${sessionId}/messages`).then((r) => j<TranscriptMessage[]>(r)),
 
-  prompt: (sessionId: string, text: string, agent?: string, model?: ModelRef) =>
-    post(`/api/sessions/${sessionId}/prompt`, { text, agent, model }).then((r) => j<{ ok: boolean }>(r)),
+  prompt: (
+    sessionId: string,
+    text: string,
+    agent?: string,
+    model?: ModelRef,
+    images?: { url: string; mediaType: string }[],
+    effort?: ThinkingEffort,
+  ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort }).then((r) => j<{ ok: boolean }>(r)),
 
   replyPermission: (sessionId: string, requestId: string, reply: "once" | "always" | "reject", feedback?: string) =>
     post(`/api/sessions/${sessionId}/permission`, { requestId, reply, feedback }).then((r) => j<{ ok: boolean }>(r)),
@@ -80,6 +98,14 @@ export const client = {
   fsFile: (path: string) =>
     fetch(`/api/fs/file?path=${encodeURIComponent(path)}`).then((r) =>
       j<{ path: string; size: number; content: string }>(r),
+    ),
+
+  fsSave: (path: string, content: string) =>
+    send("PUT", "/api/fs/file", { path, content }).then((r) => j<{ ok: boolean; size: number }>(r)),
+
+  fsSearch: (q: string) =>
+    fetch(`/api/fs/search?q=${encodeURIComponent(q)}`).then((r) =>
+      j<{ query: string; results: { path: string; type: "dir" | "file" }[] }>(r),
     ),
 
   gitStatus: () => fetch("/api/git/status").then((r) => j<GitStatus>(r)),
@@ -119,11 +145,48 @@ export const client = {
   gitDiff: (path?: string) =>
     fetch(`/api/git/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`).then((r) => j<GitDiff>(r)),
 
+  checkpoints: () =>
+    fetch("/api/git/checkpoint").then((r) =>
+      j<{ points: { hash: string; time: string; subject: string; checkpoint: boolean }[] }>(r),
+    ),
+
+  checkpointCreate: (label: string) =>
+    post("/api/git/checkpoint", { label }).then((r) => j<{ ok: boolean; skipped?: boolean; reason?: string; hash?: string }>(r)),
+
+  checkpointRestore: (hash: string) =>
+    send("PUT", "/api/git/checkpoint", { hash }).then((r) => j<{ ok: boolean }>(r)),
+
   keyStatus: () => fetch("/api/settings/key").then((r) => j<KeyStatus>(r)),
 
-  keySave: (key: string) => send("PUT", "/api/settings/key", { key }).then((r) => j<KeyStatus>(r)),
+  keySave: (key: string, ollamaUrl?: string | null) =>
+    send("PUT", "/api/settings/key", { key, ollamaUrl }).then((r) => j<KeyStatus>(r)),
+
+  keySaveOllama: (ollamaUrl: string | null) =>
+    send("PUT", "/api/settings/key", { ollamaUrl }).then((r) => j<KeyStatus>(r)),
+
+  keySaveRelay: (relayUrl: string | null) =>
+    send("PUT", "/api/settings/key", { relayUrl }).then((r) => j<KeyStatus>(r)),
 
   keyClear: () => fetch("/api/settings/key", { method: "DELETE" }).then((r) => j<KeyStatus>(r)),
+
+  mcpStatus: () => fetch("/api/mcp").then((r) => j<McpStatuses>(r)),
+
+  mcpRescan: () => post("/api/mcp").then((r) => j<McpStatuses>(r)),
+
+  pluginsList: () => fetch("/api/plugins").then((r) => j<{ plugins: PluginInfo[] }>(r)),
+
+  pluginInstall: (sourcePath: string) =>
+    post("/api/plugins", { sourcePath }).then((r) => j<{ ok: boolean; plugin?: PluginInfo; error?: string }>(r)),
+
+  pluginUninstall: (name: string) =>
+    post("/api/plugins", { action: "uninstall", name }).then((r) => j<{ ok: boolean; error?: string }>(r)),
+
+  keyRotate: () => post("/api/settings/key").then((r) => j<KeyStatus & { rotated: boolean; keyMigrated: boolean }>(r)),
+
+  /** relay 账号联动：key 列表 / 一键签发并绑定（明文只在 relay 响应中转一次）。 */
+  relayKeys: () => fetch("/api/settings/keys").then((r) => j<RelayKeyInfo>(r)),
+
+  relayKeyIssue: () => post("/api/settings/keys").then((r) => j<KeyStatus & { prefix?: string | null; error?: string }>(r)),
 
   /** 订阅某会话事件流（SSE）。返回取消函数。 */
   subscribe: (sessionId: string, cb: (ev: HarnessEvent) => void) => {

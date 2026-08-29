@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isSessionActive } from "@zmzai/agent-framework";
+
 import { resolveModel, sessionCookieName } from "@/lib/relay";
 import { cloudRuntime } from "@/lib/runtime";
 
@@ -9,7 +11,9 @@ export const runtime = "nodejs";
 export async function GET() {
   const runtime = cloudRuntime();
   const sessions = await runtime.store.listSessions({ userId: "local", workspaceId: "local" });
-  return NextResponse.json(sessions);
+  // 附带运行态（P2-15 多会话并行状态点）：runner 的 activeRuns 内存表
+  const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id) }));
+  return NextResponse.json(withStatus);
 }
 
 export async function POST(request: NextRequest) {

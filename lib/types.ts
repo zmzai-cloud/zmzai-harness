@@ -17,6 +17,8 @@ export type SessionInfo = {
   agent: string;
   model: ModelRef;
   time: { created: string; updated?: string };
+  /** 运行态（GET /api/sessions 附带，来自 runner activeRuns）。 */
+  running?: boolean;
 };
 
 export type ToolState =
@@ -52,6 +54,8 @@ export type TranscriptMessage = { info: { id: string; role: string }; parts: Par
 export type AuthStatus = {
   loggedIn: boolean;
   cookieName: string;
+  /** 已登录时的用户 profile（name/email，账户块展示用）。 */
+  user?: { name: string; email: string } | null;
 };
 
 // ===== Inspector（文件树 / Git / 终端）=====
@@ -110,9 +114,14 @@ export type ModelChannel = {
 };
 
 export type ModelsState = {
-  models: { model: string; maxInputTokens: number }[];
+  /** relay /v1/models 已按调用者身份过滤（个人 key → allowedModels 子集；登录会话 → 全部）；availableChannels 为当前健康渠道数（0 表示提交即失败）。 */
+  models: { model: string; maxInputTokens: number; availableChannels?: number }[];
   modelSelectorData: { featured: FeaturedModel[]; channels: ModelChannel[] } | null;
   authenticated: boolean;
+  /** 本地 Ollama（在线时非 null）：模型以 providerId=ollama 的 ModelRef 使用。 */
+  ollama: { baseUrl: string; models: { id: string; name: string }[] } | null;
+  /** 路由降级环形日志（P0 可观测，最近在前）。 */
+  failover: { from?: string; to: string; error: string; attempt: number }[];
 };
 
 export type SkillOption = { id: string; name: string; description?: string; markdown: string };
@@ -132,7 +141,36 @@ export type DiffFile = { path: string; additions: number; deletions: number; bin
 export type GitDiff = { available: boolean; files: DiffFile[]; diff: string; truncated?: boolean };
 
 /** 个人 key 状态（仅掩码回显）。 */
-export type KeyStatus = { configured: boolean; masked: string | null; relayUrl?: string };
+export type KeyStatus = { configured: boolean; masked: string | null; relayUrl?: string; ollamaUrl?: string | null };
+
+/** relay 账号下的 API key（控制面列表，prefix 掩码；明文只在签发时一次性返回）。 */
+export type RelayKeyInfo = {
+  loggedIn: boolean;
+  keys: { id: string; name: string; prefix: string; status: "active" | "revoked"; quotaUsedTokens: number; monthlySpendUsedMicros: number; monthlySpendLimitMicros: number; lastUsedAt: string | null }[];
+  /** harness 当前绑定 key 的 prefix（前 12 位，与列表匹配「使用中」）。 */
+  currentPrefix: string | null;
+  error?: string;
+};
+
+/** 推理力度档位（N3）：与 relay reasoning_effort 对齐；off = 不发字段。 */
+export type ThinkingEffort = "off" | "minimal" | "low" | "medium" | "high";
+
+/** MCP server 连接态（设置弹窗透出）。 */
+export type McpStatuses = {
+  statuses: { name: string; state: "connected" | "error"; transport: string; tools: string[]; error?: string }[];
+  configErrors: string[];
+  sources: string[];
+};
+
+/** 已安装插件（P1：plugin.json 目录，可携带 mcp.json / skills）。 */
+export type PluginInfo = {
+  name: string;
+  version?: string;
+  description?: string;
+  scope: "project" | "global";
+  root: string;
+  hasMcp: boolean;
+};
 
 /** Electron 宿主桥（preload.cjs 注入 window.harnessNative；Web 端不存在，需能力探测降级）。 */
 export type HarnessNativeBridge = {

@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -28,5 +29,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ path: rel, size: st.size, content: buf.toString("utf8") });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "读取文件失败" }, { status: 400 });
+  }
+}
+
+/** PUT /api/fs/file — 编辑器保存回写（工作区内，限制同 GET）。 */
+export async function PUT(request: NextRequest) {
+  const body = (await request.json().catch(() => null)) as { path?: string; content?: string } | null;
+  const rel = body?.path;
+  if (!rel || typeof body?.content !== "string") {
+    return NextResponse.json({ error: "缺少 path 或 content 参数" }, { status: 400 });
+  }
+  try {
+    const abs = resolveWithinWorkspace(rel);
+    if (Buffer.byteLength(body.content, "utf8") > MAX_BYTES) {
+      return NextResponse.json({ error: "内容超过 512KB 限制" }, { status: 400 });
+    }
+    await mkdir(path.dirname(abs), { recursive: true });
+    await writeFile(abs, body.content, "utf8");
+    return NextResponse.json({ ok: true, size: Buffer.byteLength(body.content, "utf8") });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "写入文件失败" }, { status: 400 });
   }
 }

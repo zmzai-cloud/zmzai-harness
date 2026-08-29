@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
 import CanvasPane from "./CanvasPane";
+import FileEditor from "./FileEditor";
+import MapPane from "./MapPane";
 import FileTree from "./FileTree";
 import ReviewPane from "./ReviewPane";
-import XtermPane from "./XtermPane";
+import TerminalPane from "./TerminalPane";
 
-type Tab = "review" | "files" | "canvas" | "terminal";
+type Tab = "review" | "files" | "map" | "canvas" | "terminal";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   {
@@ -29,6 +31,16 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
       <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
         <path d="M3 2.5h7l3 3v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" strokeLinejoin="round" />
         <path d="M10 2.5v3h3" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    key: "map",
+    label: "地图",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+        <path d="M2 3.5l4-1.5 4 1.5 4-1.5v10.5l-4 1.5-4-1.5-4 1.5V3.5z" strokeLinejoin="round" />
+        <path d="M6 2v10.5M10 3.5V14" />
       </svg>
     ),
   },
@@ -55,18 +67,40 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 /**
- * 产物侧工作台：审查（git diff）/ 文件（树+预览）/ 画布（HTML 产物渲染）/ 终端（xterm）。
- * 「画布打开」把文件 Tab 的 HTML 产物送进画布 Tab。
+ * 产物侧工作台：审查（git diff）/ 文件（树+预览+编辑）/ 画布（HTML 产物渲染）/ 终端（xterm）。
+ * 「画布打开」把文件 Tab 的 HTML 产物送进画布 Tab；openRequest 是外部联动
+ * （消息内路径点击 / ⌘P 文件快开）请求打开某个文件。
  */
-export default function WorkbenchPanel() {
+export default function WorkbenchPanel({ openRequest }: { openRequest?: { path: string; ts: number } | null }) {
   const [tab, setTab] = useState<Tab>("review");
   const [preview, setPreview] = useState<{ path: string; content: string; size: number } | null>(null);
+  const [editing, setEditing] = useState(false);
   const [canvasPath, setCanvasPath] = useState<string | null>(null);
+  const loadSeq = useRef(0);
+
+  // 外部联动：打开指定文件（切到文件 Tab 并加载）
+  useEffect(() => {
+    if (!openRequest) return;
+    const seq = ++loadSeq.current;
+    setTab("files");
+    setEditing(false);
+    void client
+      .fsFile(openRequest.path)
+      .then((f) => {
+        if (seq !== loadSeq.current) return;
+        setPreview({ path: f.path, content: f.content, size: f.size });
+        if (/\.(html?|htm)$/i.test(f.path)) setCanvasPath(f.path);
+      })
+      .catch((err: Error) => {
+        if (seq === loadSeq.current) setPreview({ path: openRequest.path, content: `无法预览：${err.message}`, size: 0 });
+      });
+  }, [openRequest]);
 
   // 切 Tab 时清掉文件预览（画布路径保留，方便来回对照）
   const select = (t: Tab) => {
     setTab(t);
     setPreview(null);
+    setEditing(false);
   };
 
   const previewIsHtml = preview ? /\.(html?|htm)$/i.test(preview.path) : false;
@@ -99,7 +133,10 @@ export default function WorkbenchPanel() {
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
               <button
                 type="button"
-                onClick={() => setPreview(null)}
+                onClick={() => {
+                  setPreview(null);
+                  setEditing(false);
+                }}
                 className="text-[0.6875rem] text-ink-3 transition-colors hover:text-ink"
               >
                 ← 返回
@@ -110,6 +147,17 @@ export default function WorkbenchPanel() {
               <span className="ml-auto shrink-0 text-[0.625rem] text-ink-3">
                 {preview.size < 1024 ? `${preview.size}B` : `${Math.round(preview.size / 1024)}KB`}
               </span>
+              {/* 预览/编辑切换（P1-6）：编辑模式 ⌘S 保存回写 */}
+              <button
+                type="button"
+                onClick={() => setEditing((v) => !v)}
+                className={cn(
+                  "shrink-0 rounded-pill px-2 py-0.5 text-[0.625rem] font-medium transition-colors",
+                  editing ? "bg-accent/15 text-accent-strong hover:bg-accent/25" : "bg-surface-2 text-ink-2 hover:text-ink",
+                )}
+              >
+                {editing ? "预览" : "编辑"}
+              </button>
               {previewIsHtml && (
                 <button
                   type="button"
@@ -120,24 +168,42 @@ export default function WorkbenchPanel() {
                 </button>
               )}
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto p-3 text-xs leading-5 text-ink-2">{preview.content}</pre>
+            {editing ? (
+              <FileEditor
+                key={preview.path}
+                path={preview.path}
+                initialContent={preview.content}
+                onSaved={() => {
+                  // 保存后重新拉取，保持预览态与画布候选同步
+                  void client.fsFile(preview.path).then((f) => setPreview({ path: f.path, content: f.content, size: f.size })).catch(() => undefined);
+                }}
+              />
+            ) : (
+              <pre className="min-h-0 flex-1 overflow-auto p-3 text-xs leading-5 text-ink-2">{preview.content}</pre>
+            )}
           </div>
         ) : (
           <FileTree
             onOpenFile={(path) => {
+              const seq = ++loadSeq.current;
               void client
                 .fsFile(path)
                 .then((f) => {
+                  if (seq !== loadSeq.current) return;
                   setPreview({ path: f.path, content: f.content, size: f.size });
+                  setEditing(false);
                   // HTML 产物顺手记为画布候选（点「画布打开」即用）
                   if (/\.(html?|htm)$/i.test(f.path)) setCanvasPath(f.path);
                 })
-                .catch((err: Error) => setPreview({ path, content: `无法预览：${err.message}`, size: 0 }));
+                .catch((err: Error) => {
+                  if (seq === loadSeq.current) setPreview({ path, content: `无法预览：${err.message}`, size: 0 });
+                });
             }}
           />
         ))}
+      {tab === "map" && <MapPane />}
       {tab === "canvas" && <CanvasPane path={canvasPath} onPathChange={setCanvasPath} />}
-      {tab === "terminal" && <XtermPane />}
+      {tab === "terminal" && <TerminalPane />}
     </div>
   );
 }

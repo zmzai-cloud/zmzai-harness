@@ -8,13 +8,16 @@ export const metadata: Metadata = {
 };
 
 /** 首帧前同步主题：localStorage（system/light/dark），显式 ?theme= 可强制（分享/验证用），
- *  避免 React 水合前深色用户看到一闪而过的白屏。 */
+ *  避免 React 水合前深色用户看到一闪而过的白屏。
+ *  同步标记桌面壳（preload 注入 harnessNative）：html.electron 启用集成标题栏样式
+ *  （顶栏拖拽区 + 红绿灯让位），避免首帧布局跳动。 */
 const themeBootstrap = `
 (function () {
   try {
     var q = new URLSearchParams(location.search).get("theme");
     var t = q === "dark" || q === "light" ? q : localStorage.getItem("zmzai-theme") || "system";
     if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+    if (window.harnessNative) document.documentElement.classList.add("electron");
   } catch (e) {}
 })();
 `;

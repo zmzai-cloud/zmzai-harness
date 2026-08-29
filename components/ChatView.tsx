@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Markdown, MessageItem, PermissionCard, Reasoning, ToolCard } from "@zmzai/theme";
+import { Markdown, PermissionCard, Reasoning, ToolCard, cn } from "@zmzai/theme";
 
 import type { HarnessEvent, ModelRef, Part, PermissionRequest } from "@/lib/types";
 import Composer from "./Composer";
+import DiffView, { diffStat } from "./DiffView";
 
-type UiMessage = { id: string; role: string; parts: Part[] };
+export type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" | "cancelled" };
 
-/** 把事件流投影成消息树：message.updated 建壳，part.updated 定稿，part.delta 增量文本 */
-function project(events: HarnessEvent[]): UiMessage[] {
-  const messages = new Map<string, { id: string; role: string; parts: Map<string, Part> }>();
+type UiPart = { part: Part; diff?: string };
+type UiMessage = { id: string; role: string; parts: UiPart[] };
+
+/** 把事件流投影成消息树：message.updated 建壳，part.updated 定稿，part.delta 增量文本。
+ *  file.edited（引擎在 write/edit 落盘时发出，带现成 unified diff）按 path 挂到
+ *  对应的 edit/write 工具调用上，渲染为内联 diff 卡片。
+ *  同时收集 read 工具读取过的文件（去重，最新在前）→ 上下文读取 pill 列表。 */
+function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoItem[] | null; reads: string[] } {
+  const messages = new Map<string, { id: string; role: string; parts: Map<string, UiPart> }>();
   const order: string[] = [];
+  // 未消费的 file.edited：path → diff 队列（事件序在前，tool part 定稿在后）
+  const pendingEdits = new Map<string, string[]>();
+  let todos: TodoItem[] | null = null;
+  const reads: string[] = [];
   for (const ev of events) {
     if (ev.type === "message.updated") {
       const m = (ev.data as { message: { id: string; role: string } }).message;
@@ -21,23 +32,50 @@ function project(events: HarnessEvent[]): UiMessage[] {
       const p = (ev.data as { part: Part }).part;
       const m = messages.get(p.messageId);
       if (!m) continue;
-      m.parts.set(p.id, p);
+      // read 类工具调用 → 上下文读取列表（去重，最新在前）
+      if (p.type === "tool" && (p.tool === "read" || p.tool === "glob" || p.tool === "grep")) {
+        const path = (p.state.input as { path?: string } | undefined)?.path;
+        if (path) {
+          const i = reads.indexOf(path);
+          if (i >= 0) reads.splice(i, 1);
+          reads.unshift(path);
+        }
+      }
+      // edit/write 工具定稿时，把该 path 最早的未消费 diff 挂上
+      let diff: string | undefined;
+      if ((p.type === "tool" && (p.tool === "edit" || p.tool === "write"))) {
+        const path = (p.state.input as { path?: string } | undefined)?.path;
+        const queue = path ? pendingEdits.get(path) : undefined;
+        if (queue?.length) diff = queue.shift();
+      }
+      m.parts.set(p.id, { part: p, diff });
     } else if (ev.type === "message.part.delta") {
       const d = ev.data as { messageId: string; partId: string; delta: string };
       const m = messages.get(d.messageId);
       if (!m) continue;
       const existing = m.parts.get(d.partId);
-      if (existing && existing.type === "text") {
-        m.parts.set(d.partId, { ...existing, text: existing.text + d.delta });
+      if (existing && existing.part.type === "text") {
+        m.parts.set(d.partId, { part: { ...existing.part, text: existing.part.text + d.delta } });
       } else {
-        m.parts.set(d.partId, { id: d.partId, type: "text", text: d.delta, messageId: d.messageId, sessionId: "" });
+        m.parts.set(d.partId, { part: { id: d.partId, type: "text", text: d.delta, messageId: d.messageId, sessionId: "" } });
       }
+    } else if (ev.type === "file.edited") {
+      const d = ev.data as { path: string; diff: string };
+      const queue = pendingEdits.get(d.path) ?? [];
+      queue.push(d.diff);
+      pendingEdits.set(d.path, queue);
+    } else if (ev.type === "todo.updated") {
+      todos = (ev.data as { todos: TodoItem[] }).todos;
     }
   }
-  return order.map((id) => {
-    const m = messages.get(id)!;
-    return { id: m.id, role: m.role, parts: [...m.parts.values()] };
-  });
+  return {
+    messages: order.map((id) => {
+      const m = messages.get(id)!;
+      return { id: m.id, role: m.role, parts: [...m.parts.values()] };
+    }),
+    todos,
+    reads: reads.slice(0, 8),
+  };
 }
 
 function statusLabel(status: string): string {
@@ -53,7 +91,38 @@ function statusLabel(status: string): string {
   }
 }
 
-function PartView({ part, markdown = false }: { part: Part; markdown?: boolean }) {
+/** 内联 diff 卡片：edit/write 工具调用落盘后的变更预览（写入已即时生效）。 */
+function EditDiffCard({ path, diff }: { path: string; diff: string }) {
+  const [open, setOpen] = useState(false);
+  const { additions, deletions } = diffStat(diff);
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2"
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-ink-3">
+          <path d="M9 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6L9 2z" strokeLinejoin="round" />
+          <path d="M9 2v4h4" strokeLinejoin="round" />
+        </svg>
+        <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={path}>{path}</span>
+        <span className="shrink-0 font-mono text-[0.625rem]">
+          <span className="text-success">+{additions}</span> <span className="text-danger">-{deletions}</span>
+        </span>
+        <svg
+          width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"
+          className={cn("shrink-0 text-ink-3 transition-transform", open && "rotate-180")}
+        >
+          <path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && <DiffView diff={diff} className="max-h-72 border-t border-line" />}
+    </div>
+  );
+}
+
+function PartView({ part, diff, markdown = false }: { part: Part; diff?: string; markdown?: boolean }) {
   switch (part.type) {
     case "text":
       // assistant 正文用 Markdown（流式稳定、代码高亮）；用户消息保持纯文本
@@ -66,16 +135,28 @@ function PartView({ part, markdown = false }: { part: Part; markdown?: boolean }
       );
     case "reasoning":
       return <Reasoning text={part.text} />;
-    case "tool":
+    case "tool": {
+      // edit/write 且拿到 file.edited 的 diff → 渲染内联 diff 卡片（替代 ToolCard）
+      if (diff && (part.tool === "edit" || part.tool === "write")) {
+        const path = (part.state.input as { path?: string } | undefined)?.path ?? "";
+        return <EditDiffCard path={path} diff={diff} />;
+      }
       return (
         <ToolCard call={{ id: part.callId, tool: part.tool, state: part.state }} sessionIdle={false} />
       );
+    }
     case "subtask":
       return <div className="text-xs text-ink-2">子任务（{part.agent}）：{part.description}</div>;
     case "file":
       return <div className="text-xs text-ink-2">产物文件：{part.filename}</div>;
     case "image":
-      return <div className="text-xs text-ink-2">产物图片</div>;
+      // 多模态图片输入（P2-11）：用户随消息上传的图片直接内联展示
+      return part.url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={part.url} alt="附件图片" className="max-h-64 rounded-lg border border-line" />
+      ) : (
+        <div className="text-xs text-ink-2">产物图片</div>
+      );
     case "compaction":
       return <div className="text-xs text-ink-2">上下文已压缩：{part.summary}</div>;
     default:
@@ -93,12 +174,62 @@ type Props = {
   onSend: (t: string) => void;
   onReply: (r: "once" | "always" | "reject", feedback?: string) => void;
   onAbort: () => void;
+  /** 点击消息内的文件路径 → 产物侧文件 Tab 打开（P1-10 联动）。 */
+  onOpenFile: (path: string) => void;
+  /** 自治档位（P1-7）：确认 = 每次授权弹卡；自动 = 自动授 always。 */
+  autoMode: boolean;
+  onToggleAuto: () => void;
 };
 
-export default function ChatView({ events, status, pending, sessionId, selectedModel, onSelectModel, onSend, onReply, onAbort }: Props) {
-  const messages = useMemo(() => project(events), [events]);
+/** 任务计划卡：todo.updated 投影（Agent 拆解步骤的实时进度）。 */
+function TodoCard({ todos }: { todos: TodoItem[] }) {
+  const done = todos.filter((t) => t.status === "completed").length;
+  const icon = (status: TodoItem["status"]) => {
+    if (status === "completed")
+      return <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-[8px] font-bold text-bg">✓</span>;
+    if (status === "in_progress")
+      return <span className="h-3.5 w-3.5 animate-pulse rounded-full border-2 border-accent-strong" />;
+    if (status === "cancelled")
+      return <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-surface-2 text-[8px] text-ink-3">—</span>;
+    return <span className="h-3.5 w-3.5 rounded-full border border-line-strong" />;
+  };
+  return (
+    <div className="rounded-lg border border-line bg-surface p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[0.6875rem] font-semibold tracking-wide text-ink-3">任务计划</span>
+        <span className="font-mono text-[0.625rem] text-ink-3">{done}/{todos.length}</span>
+        <span className="h-1 flex-1 overflow-hidden rounded-pill bg-surface-2">
+          <span
+            className="block h-full rounded-pill bg-accent-strong transition-all"
+            style={{ width: `${todos.length ? Math.round((done / todos.length) * 100) : 0}%` }}
+          />
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {todos.map((t, i) => (
+          <div key={i} className="flex items-center gap-2">
+            {icon(t.status)}
+            <span
+              className={cn(
+                "text-xs leading-5",
+                t.status === "completed" ? "text-ink-3 line-through" : t.status === "in_progress" ? "font-medium text-ink" : "text-ink-2",
+              )}
+            >
+              {t.content}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatView({ events, status, pending, sessionId, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto }: Props) {
+  const { messages, todos, reads } = useMemo(() => project(events), [events]);
   const running = status === "running";
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  // 用户消息「编辑重发」草稿：回填给 Composer，消费后清空
+  const [draft, setDraft] = useState<string | null>(null);
   // 新消息/片段到达时自动滚到底（流式输出的基本体验）
   useEffect(() => {
     const el = messagesRef.current;
@@ -120,31 +251,129 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
           <span className={`h-1.5 w-1.5 rounded-full ${running ? "animate-pulse bg-accent-strong" : "bg-ink-3"}`} />
           {statusLabel(status)}
         </span>
+        <span className="flex-1" />
+        {/* 自治档位（P1-7）：对标 Qoder 的 Quest 自动执行 */}
+        <button
+          type="button"
+          onClick={onToggleAuto}
+          title={autoMode ? "自动档：写文件/命令不再逐次确认，点击切回确认档" : "确认档：敏感操作逐次确认，点击切到自动档"}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[0.6875rem] font-medium transition-colors",
+            autoMode ? "bg-accent/20 text-accent-strong" : "bg-surface-2 text-ink-2 hover:text-ink",
+          )}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            {autoMode ? (
+              <path d="M2.5 8.5l3.5 3.5 7.5-8" strokeLinecap="round" strokeLinejoin="round" />
+            ) : (
+              <>
+                <rect x="3.5" y="6.5" width="9" height="7" rx="1.2" />
+                <path d="M5.5 6.5V5a2.5 2.5 0 0 1 5 0v1.5" />
+              </>
+            )}
+          </svg>
+          {autoMode ? "自动" : "确认"}
+        </button>
       </div>
-      <div className="messages flex-1 space-y-5 overflow-y-auto px-6 py-5" ref={messagesRef}>
+      {/* 上下文读取 pill（P2-13）：本轮 Agent 读过的文件，点击联动打开 */}
+      {reads.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-4 py-1.5">
+          <span className="text-[0.625rem] text-ink-3">读过</span>
+          {reads.map((path) => (
+            <button
+              key={path}
+              type="button"
+              onClick={() => onOpenFile(path)}
+              title={`${path} · 点击在文件 Tab 打开`}
+              className="max-w-44 truncate rounded-pill bg-surface-2 px-2 py-0.5 font-mono text-[0.625rem] text-ink-2 transition-colors hover:bg-line hover:text-ink"
+            >
+              {path}
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        className="messages max-w-3xl flex-1 space-y-7 overflow-y-auto px-6 py-6"
+        ref={messagesRef}
+        onClick={(e) => {
+          // P1-10 路径联动：点击 Markdown 正文中的 code/a 元素，若文本像工作区内路径则打开文件 Tab
+          const el = (e.target as HTMLElement).closest("code, a");
+          const raw = el?.textContent ?? "";
+          const m = raw.trim().match(/^[.\w-]+(?:\/[.\w-]+)*\.[A-Za-z0-9]{1,6}$/);
+          if (m) {
+            e.preventDefault();
+            onOpenFile(m[0]);
+          }
+        }}
+      >
+        {todos && todos.length > 0 && <TodoCard todos={todos} />}
         {messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <div className="text-sm font-semibold text-ink-2">还没有消息</div>
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-2">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <path d="M8 1.5l1.6 3.6 3.9.4-2.9 2.6.8 3.9L8 10l-3.4 2l.8-3.9L2.5 5.5l3.9-.4L8 1.5z" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div className="text-base font-semibold tracking-tight text-ink">今天要做点什么？</div>
             <div className="max-w-sm text-xs leading-6 text-ink-3">
-              新建会话并发送任务，Agent 会在左侧会话中工作，需要授权时会在这里向你确认。
+              给 Agent 下达任务，它会直接在当前项目里工作；需要改动文件时你会在这里收到授权确认。
             </div>
           </div>
         )}
         {messages.map((m, idx) => {
           const isAssistant = m.role === "assistant";
           const lastActive = isAssistant && idx === messages.length - 1 && running;
+          if (!isAssistant) {
+            // IDE 式用户消息：右侧浅色圆角气泡 + hover 操作（复制/编辑回填）
+            const text = m.parts
+              .map((p) => (p.part.type === "text" ? p.part.text : ""))
+              .join("");
+            return (
+              <div key={m.id} className="group flex justify-end">
+                <div className="relative max-w-[85%]">
+                  <div className="whitespace-pre-wrap rounded-lg rounded-br-sm bg-surface-2 px-3.5 py-2.5 text-[0.875rem] leading-[1.65] text-ink">
+                    {text}
+                  </div>
+                  <div className="absolute -left-14 top-1 hidden items-center gap-0.5 group-hover:flex">
+                    <button
+                      type="button"
+                      title="复制"
+                      onClick={() => void navigator.clipboard.writeText(text)}
+                      className="flex h-6 w-6 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                        <rect x="5.5" y="5.5" width="8" height="8" rx="1" />
+                        <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="编辑重发"
+                      onClick={() => setDraft(text)}
+                      className="flex h-6 w-6 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                        <path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5 12.8l-3 .7.7-3 8.6-8.2z" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          // Agent 消息：全宽开放排版（主流惯例：无头像无标签，运行指示放内容尾部）
           return (
-            <MessageItem
-              key={m.id}
-              role={m.role as "user" | "assistant"}
-              avatar={isAssistant ? "智" : "我"}
-              name={isAssistant ? "Agent" : "我"}
-              status={lastActive ? { active: true } : undefined}
-            >
+            <div key={m.id} className="space-y-2.5">
               {m.parts.map((p, i) => (
-                <PartView key={i} part={p} markdown={isAssistant} />
+                <PartView key={i} part={p.part} diff={p.diff} markdown />
               ))}
-            </MessageItem>
+              {lastActive && (
+                <div className="flex items-center gap-1.5 pt-0.5 text-[0.6875rem] text-accent-strong">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-strong" />
+                  正在工作…
+                </div>
+              )}
+            </div>
           );
         })}
         {pending && (
@@ -161,6 +390,8 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
         onSelectModel={onSelectModel}
         onSend={onSend}
         onAbort={onAbort}
+        draft={draft}
+        onDraftConsumed={() => setDraft(null)}
       />
     </div>
   );

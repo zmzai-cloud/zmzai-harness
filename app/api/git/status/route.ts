@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
-import { workspaceRoot } from "@/lib/runtime";
+import { activeWorkspaceRoot } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export type GitChange = { x: string; y: string; path: string; origPath?: string 
 
 function run(args: string[]): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile("git", args, { cwd: workspaceRoot, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("git", args, { cwd: activeWorkspaceRoot(), maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr.trim() || err.message));
       else resolvePromise(stdout);
     });

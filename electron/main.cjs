@@ -90,6 +90,11 @@ function createWindow() {
     backgroundColor: "#ffffff",
     title: "zmzai agent harness",
     icon: path.join(__dirname, "..", "build", "icon.png"),
+    // 集成标题栏（Qoder/VSCode 同款）：隐藏系统标题栏，保留红绿灯（macOS），
+    // 页面顶栏变拖拽区（见 globals.css html.electron 规则）。非 macOS 自动忽略。
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 14, y: 17 } }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

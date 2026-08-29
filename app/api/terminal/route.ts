@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { terminalManager, workspaceRoot } from "@/lib/runtime";
+import { terminalManager, activeWorkspaceRoot } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
     const session = await mgr.start({
       name: body?.name ?? command.slice(0, 60),
       command,
-      cwd: workspaceRoot,
+      // 函数取值：随项目切换即时生效（裸 import let 导出经 webpack 编译后 live binding 断裂，恒为启动时项目）
+      cwd: activeWorkspaceRoot(),
       cols: 120,
       rows: 30,
     });

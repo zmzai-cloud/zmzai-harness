@@ -4,9 +4,20 @@
  * 同域 cookie 透传过去，即「登录一次，全链路可用」。
  */
 
-// relay 端点优先 RELAY_URL，其次与 LLM provider 同源的 OPENAI_BASE_URL，兜底本机
-const relayBaseRaw = process.env.RELAY_URL ?? process.env.OPENAI_BASE_URL ?? "http://127.0.0.1:3003/api/v1";
-export const relayBase = relayBaseRaw.replace(/\/$/, "");
+import { getSettings } from "./settings";
+
+// relay 端点优先级：设置页配置（settings.json）> RELAY_URL > OPENAI_BASE_URL > 本机。
+// 函数形式：设置页修改后聊天/模型列表链路即时生效，无需重启。
+export function relayBase(): string {
+  const raw = getSettings().relayUrl ?? process.env.RELAY_URL ?? process.env.OPENAI_BASE_URL ?? "http://127.0.0.1:3003/api/v1";
+  return raw.replace(/\/$/, "");
+}
+
+/** relay 控制面基址（/api/me/* 等站点 API）：OpenAI 兼容前缀（…/api/v1 或 …/v1）反推。 */
+export function relayControlBase(): string {
+  const base = relayBase().replace(/\/v1$/, "");
+  return base.endsWith("/api") ? base : `${base}/api`;
+}
 export const muzhiBase = (process.env.MUZHI_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
 export const sessionCookieName = process.env.SESSION_COOKIE_NAME ?? "muzhi_session";
 
@@ -27,7 +38,7 @@ export type ModelsResponse = { models: RelayModel[]; modelSelectorData: ModelSel
 /** 调 relay 的 GET 接口；cookie 为 null 时同样发请求（relay 会 401）。 */
 export async function relayGet<T>(path: string, cookie: string | null): Promise<T | null> {
   try {
-    const res = await fetch(`${relayBase}${path}`, {
+    const res = await fetch(`${relayBase()}${path}`, {
       headers: cookie ? { cookie } : {},
       cache: "no-store",
     });
@@ -42,6 +53,50 @@ export async function relayGet<T>(path: string, cookie: string | null): Promise<
 export async function relayAuthStatus(cookie: string | null): Promise<{ loggedIn: boolean; cookieName: string }> {
   const data = await relayGet<ModelsResponse>("/models", cookie);
   return { loggedIn: data !== null, cookieName: sessionCookieName };
+}
+
+/** 当前登录用户 profile（name/email，账户块展示用）；未登录/不可达返回 null。
+ *  降级链：relay /api/me/profile（新部署）→ muzhi /api/auth/me（同一 session，
+ *  生产 relay 旧版无 profile 端点时旧 404 会导致「登录成功但恒显未登录」）。 */
+export async function relayCurrentUser(cookie: string | null): Promise<{ id: string; name: string; email: string } | null> {
+  const fromJson = (j: unknown): { id: string; name: string; email: string } | null => {
+    const u = (j as { user?: { id?: string; name?: string; email?: string } } | null)?.user;
+    return u?.id && u.name && u.email ? { id: u.id, name: u.name, email: u.email } : null;
+  };
+  try {
+    const res = await fetch(`${relayControlBase()}/me/profile`, {
+      headers: cookie ? { cookie } : {},
+      cache: "no-store",
+    });
+    if (res.ok) return (await res.json()) as { id: string; name: string; email: string };
+  } catch {
+    // 落到 muzhi 降级
+  }
+  if (!cookie) return null;
+  try {
+    const res = await fetch(`${muzhiBase}/api/auth/me`, {
+      headers: { cookie },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return fromJson(await res.json().catch(() => null));
+  } catch {
+    return null;
+  }
+}
+
+/** 退出登录：转发 relay /api/logout（删除共享会话并清父域 cookie）。 */
+export async function relayLogout(cookie: string | null): Promise<boolean> {
+  try {
+    const res = await fetch(`${relayControlBase()}/logout`, {
+      method: "POST",
+      headers: cookie ? { cookie } : {},
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** 模型目录 + 用户配置（featured/channels），未登录返回 null。 */

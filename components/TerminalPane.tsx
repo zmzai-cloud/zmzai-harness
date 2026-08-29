@@ -1,46 +1,74 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, cn } from "@zmzai/theme";
+import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
-import type { TerminalSession } from "@/lib/types";
-
-/** 剥除 ANSI 转义序列（颜色/光标控制）——只读日志面板不需要保留。 */
-function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
-}
+import "@xterm/xterm/css/xterm.css";
 
 type Mode = "boot" | "shell" | "runner" | "dead";
 
+/** VSCode Dark+ 终端配色。 */
+const VSC_THEME = {
+  background: "#1d1d1d",
+  foreground: "#cccccc",
+  cursor: "#cccccc",
+  cursorAccent: "#1d1d1d",
+  selectionBackground: "#264f78",
+  black: "#000000",
+  red: "#cd3131",
+  green: "#0dbc79",
+  yellow: "#e5e513",
+  blue: "#2472c8",
+  magenta: "#bc3fbc",
+  cyan: "#11a8cd",
+  white: "#e5e5e5",
+  brightBlack: "#666666",
+  brightRed: "#f14c4c",
+  brightGreen: "#23d18b",
+  brightYellow: "#f5f543",
+  brightBlue: "#3b8eea",
+  brightMagenta: "#d670d6",
+  brightCyan: "#29b8db",
+  brightWhite: "#e5e5e5",
+} as const;
+
+type XTerm = InstanceType<Awaited<ReturnType<typeof loadXterm>>["Terminal"]>;
+
+type FitAddonInstance = InstanceType<Awaited<ReturnType<typeof loadXterm>>["FitAddon"]>;
+
+async function loadXterm() {
+  const [{ Terminal }, { FitAddon }] = await Promise.all([
+    import("@xterm/xterm"),
+    import("@xterm/addon-fit"),
+  ]);
+  return { Terminal, FitAddon };
+}
+
 /**
- * 终端面板。两种后端两种形态：
- * - pty（node-pty 可用）：启动常驻交互 sh，cd/变量等状态跨命令延续，write 直写 stdin；
- * - pipe（降级）：命令运行器，每条命令一个 sh -c 会话，游标增量读输出。
- * 输出统一为只读日志流（剥 ANSI），300ms 轮询增量拉取。
+ * 终端面板（VSCode 式）：xterm.js 全真渲染——深色终端体、ANSI 颜色、
+ * 光标内联在输出流（无独立输入框）。两种后端两种形态：
+ * - pty（node-pty 可用）：常驻交互 zsh，键盘输入 onData 直写 stdin，
+ *   回显/补全/ctrl-c 全由真实 shell 处理，与 VSCode 内置终端同感；
+ * - pipe（降级）：命令运行器，onData 聚合成行，Enter 提交并回显。
+ * 输出经 300ms 轮询增量拉取，原文 write 进 xterm（保留 ANSI）。
  */
 export default function TerminalPane() {
   const [mode, setMode] = useState<Mode>("boot");
-  const [lines, setLines] = useState<string[]>([]);
-  const [command, setCommand] = useState("");
-  const [active, setActive] = useState<TerminalSession | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
-  const outRef = useRef<HTMLDivElement | null>(null);
+  const [backend, setBackend] = useState<"pty" | "pipe">("pty");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddonInstance | null>(null);
+  const activeRef = useRef<{ id: string; status: string } | null>(null);
+  const modeRef = useRef<Mode>("boot");
   const cursorRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lineBufRef = useRef("");
+  const obsRef = useRef<ResizeObserver | null>(null);
 
-  const append = useCallback((text: string) => {
-    if (!text) return;
-    setLines((prev) => {
-      // 流式增量可能不带换行——最后一段先拼进末行
-      const chunks = stripAnsi(text).split("\n");
-      const next = [...prev];
-      if (next.length > 0) next[next.length - 1] += chunks[0] ?? "";
-      next.push(...chunks.slice(1));
-      return next;
-    });
+  const setModeSafe = useCallback((m: Mode) => {
+    modeRef.current = m;
+    setMode(m);
   }, []);
 
   const stopPoll = useCallback(() => {
@@ -50,7 +78,7 @@ export default function TerminalPane() {
     }
   }, []);
 
-  /** 轮询循环：读到会话退出为止（shell 退出后允许重启）。 */
+  /** 轮询循环：增量读 → 原文 write（保留 ANSI 颜色），会话退出即标记 dead。 */
   const startPoll = useCallback(
     (sessionId: string) => {
       stopPoll();
@@ -58,193 +86,176 @@ export default function TerminalPane() {
         try {
           const chunk = await client.terminalRead(sessionId, cursorRef.current);
           cursorRef.current = chunk.cursor;
-          append(chunk.output);
+          if (chunk.output) termRef.current?.write(chunk.output);
           if (chunk.session.status !== "running") {
             stopPoll();
-            setActive(null);
-            setMode("dead");
+            activeRef.current = null;
+            setModeSafe("dead");
+            termRef.current?.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
           }
         } catch {
           stopPoll();
-          setActive(null);
-          setMode("dead");
+          activeRef.current = null;
+          setModeSafe("dead");
         }
       }, 300);
     },
-    [append, stopPoll],
+    [stopPoll, setModeSafe],
   );
 
-  // 挂载即建终端：pty 起交互 shell，pipe 直接命令运行器
+  /** 启动会话并进入轮询（pty 起交互 zsh / pipe 起命令运行器）。 */
+  const boot = useCallback(async () => {
+    const term = termRef.current;
+    if (!term) return;
+    term.reset();
+    stopPoll();
+    cursorRef.current = 0;
+    activeRef.current = null;
+    setModeSafe("boot");
+    try {
+      const { backendKind } = await client.terminalList();
+      setBackend(backendKind);
+      if (backendKind === "pty") {
+        const s = await client.terminalStart("zsh -i");
+        activeRef.current = s;
+        setModeSafe("shell");
+        startPoll(s.id);
+      } else {
+        setModeSafe("runner");
+        term.write("\x1b[90m输入命令并回车执行（降级模式：每条命令独立会话）\x1b[0m\r\n");
+      }
+    } catch {
+      setModeSafe("dead");
+      term.write("\x1b[31m[终端服务不可达]\x1b[0m\r\n");
+    }
+  }, [startPoll, stopPoll, setModeSafe]);
+
+  // 挂载：建 xterm 实例 + 输入接线 + 自适应尺寸 + 启动会话
   useEffect(() => {
     let disposed = false;
     (async () => {
-      try {
-        const { backendKind } = await client.terminalList();
-        if (disposed) return;
-        if (backendKind === "pty") {
-          const s = await client.terminalStart("sh -i");
-          if (disposed) return;
-          cursorRef.current = 0;
-          setActive(s);
-          setMode("shell");
-          startPoll(s.id);
-        } else {
-          setMode("runner");
+      const { Terminal, FitAddon } = await loadXterm();
+      if (disposed || !containerRef.current) return;
+      const term = new Terminal({
+        fontSize: 12,
+        fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Code", monospace',
+        lineHeight: 1.3,
+        cursorBlink: true,
+        convertEol: false,
+        scrollback: 5000,
+        theme: VSC_THEME,
+      });
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(containerRef.current);
+      fit.fit();
+      termRef.current = term;
+      fitRef.current = fit;
+
+      // 键盘直写 stdin（pty）；pipe 模式聚合行，Enter 提交
+      term.onData((d) => {
+        const m = modeRef.current;
+        const s = activeRef.current;
+        if (m === "shell" && s) {
+          void client.terminalInput(s.id, d).catch(() => undefined);
+          return;
         }
-      } catch {
-        if (!disposed) setMode("dead");
-      }
+        if (m === "runner" && !s) {
+          if (d === "\r") {
+            const cmd = lineBufRef.current.trim();
+            lineBufRef.current = "";
+            if (!cmd) {
+              term.write("\r\n\x1b[90m$\x1b[0m ");
+              return;
+            }
+            term.write("\r\n");
+            (async () => {
+              try {
+                const session = await client.terminalStart(cmd);
+                activeRef.current = session;
+                cursorRef.current = 0;
+                startPoll(session.id);
+              } catch (err) {
+                term.write(`\x1b[31m[启动失败：${err instanceof Error ? err.message : "未知错误"}]\x1b[0m\r\n`);
+              }
+            })();
+          } else if (d === "\x7f") {
+            if (lineBufRef.current.length > 0) {
+              lineBufRef.current = lineBufRef.current.slice(0, -1);
+              term.write("\b \b");
+            }
+          } else if (d >= " ") {
+            lineBufRef.current += d;
+            term.write(d);
+          }
+        }
+      });
+
+      // 容器尺寸变化时自适应（侧栏拖拽/窗口缩放）
+      const obs = new ResizeObserver(() => {
+        try {
+          fit.fit();
+        } catch {
+          // 容器不可见时 fit 会抛错，忽略
+        }
+      });
+      obs.observe(containerRef.current);
+      obsRef.current = obs;
+
+      void boot();
     })();
     return () => {
       disposed = true;
+      obsRef.current?.disconnect();
       // shell 会话随面板关闭回收，避免子进程泄漏
-      setActive((s) => {
-        if (s && s.status === "running") void client.terminalKill(s.id).catch(() => undefined);
-        return null;
-      });
+      const s = activeRef.current;
+      if (s && s.status === "running") void client.terminalKill(s.id).catch(() => undefined);
+      activeRef.current = null;
       stopPoll();
+      termRef.current?.dispose();
+      termRef.current = null;
     };
-  }, [startPoll, stopPoll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const submit = useCallback(
-    async (cmd: string) => {
-      if (!cmd.trim()) return;
-      setHistory((prev) => [...prev.filter((h) => h !== cmd), cmd].slice(-50));
-      setHistoryIdx(-1);
-      setCommand("");
-      if (mode === "shell" && active) {
-        setLines((prev) => [...prev, `$ ${cmd}`]);
-        void client.terminalInput(active.id, `${cmd}\n`).catch(() => undefined);
-        return;
-      }
-      if (mode === "runner" && !active) {
-        setLines((prev) => [...prev, `$ ${cmd}`]);
-        try {
-          const s = await client.terminalStart(cmd);
-          cursorRef.current = 0;
-          setActive(s);
-          startPoll(s.id);
-        } catch (err) {
-          append(`[启动失败：${err instanceof Error ? err.message : "未知错误"}]\n`);
-        }
-      }
-    },
-    [mode, active, startPoll, append],
-  );
+  const headerLabel =
+    mode === "boot" ? "启动中…" : mode === "dead" ? "已退出" : backend === "pty" ? "zsh" : "命令运行";
 
-  const abort = useCallback(async () => {
-    if (!active) return;
-    stopPoll();
-    await client.terminalKill(active.id).catch(() => undefined);
-    append("[已中止]\n");
-    setActive(null);
-    setMode(mode === "shell" ? "dead" : "runner");
-  }, [active, stopPoll, append, mode]);
-
-  const restart = useCallback(() => {
-    setLines([]);
-    cursorRef.current = 0;
-    // 重新走挂载逻辑：pty 重起 shell / runner 回命令模式
-    setMode("boot");
-    (async () => {
-      try {
-        const { backendKind } = await client.terminalList();
-        if (backendKind === "pty") {
-          const s = await client.terminalStart("sh -i");
-          cursorRef.current = 0;
-          setActive(s);
-          setMode("shell");
-          startPoll(s.id);
-        } else {
-          setMode("runner");
-        }
-      } catch {
-        setMode("dead");
-      }
-    })();
-  }, [startPoll]);
-
-  // 输出增长时自动滚底
-  useEffect(() => {
-    const el = outRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines]);
-
-  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void submit(command);
-    } else if (e.key === "ArrowUp" && history.length > 0) {
-      e.preventDefault();
-      const idx = historyIdx < 0 ? history.length - 1 : Math.max(0, historyIdx - 1);
-      setHistoryIdx(idx);
-      setCommand(history[idx] ?? "");
-    } else if (e.key === "ArrowDown" && history.length > 0) {
-      e.preventDefault();
-      if (historyIdx < 0) return;
-      const idx = historyIdx + 1;
-      if (idx >= history.length) {
-        setHistoryIdx(-1);
-        setCommand("");
-      } else {
-        setHistoryIdx(idx);
-        setCommand(history[idx] ?? "");
-      }
-    }
-  };
-
-  const inputDisabled = mode !== "shell" && mode !== "runner";
+  const iconBtn =
+    "flex h-6 w-6 items-center justify-center rounded-sm text-[#cccccc]/60 transition-colors hover:bg-white/10 hover:text-[#cccccc]";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-mono">
-      <div ref={outRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {lines.length === 0 ? (
-          <div className="text-xs leading-6 text-ink-3">
-            {mode === "boot"
-              ? "终端启动中…"
-              : mode === "runner"
-                ? "在下方输入命令，于工作区目录执行。输出实时回传，支持 ↑/↓ 翻历史。"
-                : mode === "dead"
-                  ? "终端已退出。"
-                  : ""}
-          </div>
-        ) : (
-          <pre className="whitespace-pre-wrap break-all text-xs leading-5 text-ink-2">{lines.join("\n")}</pre>
-        )}
+    <div className="flex min-h-0 flex-1 flex-col bg-[#1d1d1d]">
+      {/* VSCode 式终端头：左标签 + 右动作（清屏/重启） */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-white/10 px-2">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-t-sm px-2 py-1 text-[0.6875rem] font-medium",
+            mode === "dead" ? "text-[#cccccc]/50" : "bg-white/10 text-[#e7e7e7]",
+          )}
+        >
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              mode === "shell" || mode === "runner" ? "bg-[#0dbc79]" : mode === "boot" ? "bg-[#e5e513] animate-pulse" : "bg-[#666]",
+            )}
+          />
+          {headerLabel}
+        </span>
+        <span className="flex-1" />
+        <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M2 4.5h12M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M4 4.5l.7 8a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button type="button" title="重启终端" onClick={() => void boot()} className={iconBtn}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
-      <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2">
-        <span className={cn("text-xs font-semibold", active ? "text-warning" : "text-accent-strong")}>$</span>
-        <input
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={onKey}
-          disabled={inputDisabled}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoComplete="off"
-          placeholder={
-            mode === "shell"
-              ? "交互 shell 已就绪（cd/环境变量状态延续）"
-              : active
-                ? `正在执行：${active.name ?? ""}`
-                : "输入命令，Enter 执行"
-          }
-          className="h-7 min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3"
-        />
-        {active ? (
-          <Button variant="danger" size="sm" onClick={() => void abort()}>
-            中止
-          </Button>
-        ) : mode === "dead" ? (
-          <Button variant="secondary" size="sm" onClick={restart}>
-            重启
-          </Button>
-        ) : (
-          <Button variant="secondary" size="sm" onClick={() => void submit(command)}>
-            执行
-          </Button>
-        )}
-      </div>
+      {/* 终端体：xterm 挂载点（光标内联，无独立输入框） */}
+      <div ref={containerRef} className="min-h-0 flex-1 px-2 py-1" />
     </div>
   );
 }

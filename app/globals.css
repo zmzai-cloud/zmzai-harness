@@ -120,3 +120,18 @@ html[data-theme="dark"] {
     color: var(--color-accent-ink);
   }
 }
+
+/* ===== Electron 集成标题栏（html.electron 由首帧脚本按 harnessNative 存在性注入） =====
+ * 顶栏整体可拖拽窗口；交互元素恢复点击。浏览器中 -webkit-app-region 无效，天然无害。 */
+html.electron header {
+  -webkit-app-region: drag;
+}
+html.electron header button,
+html.electron header a,
+html.electron header input {
+  -webkit-app-region: no-drag;
+}
+/* macOS hiddenInset 红绿灯悬浮在左上角，品牌区让位避免重叠 */
+html.electron header > div:first-child {
+  padding-left: 68px;
+}
