@@ -7,7 +7,9 @@ import DiffView, { diffStat } from "./DiffView";
 
 export type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" | "cancelled" };
 
-type UiPart = { part: Part; diff?: string };
+type SubagentStep = { tool: string; title?: string; state?: string };
+type SubagentActivity = { steps: SubagentStep[]; finished?: { state: string; durationMs?: number; toolCalls?: number } };
+type UiPart = { part: Part; diff?: string; subagent?: SubagentActivity };
 type UiMessage = { id: string; role: string; parts: UiPart[] };
 
 /** 把事件流投影成消息树：message.updated 建壳，part.updated 定稿，part.delta 增量文本。
@@ -19,6 +21,9 @@ function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoIt
   const order: string[] = [];
   // 未消费的 file.edited：path → diff 队列（事件序在前，tool part 定稿在后）
   const pendingEdits = new Map<string, string[]>();
+  // 子代理活动（R3）：childSessionId → steps/finished，subtask part 挂同一引用，
+  // part 定稿前后的 step/finished 事件都能体现在最终对象上
+  const subagentActivity = new Map<string, SubagentActivity>();
   let todos: TodoItem[] | null = null;
   const reads: string[] = [];
   for (const ev of events) {
@@ -48,7 +53,7 @@ function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoIt
         const queue = path ? pendingEdits.get(path) : undefined;
         if (queue?.length) diff = queue.shift();
       }
-      m.parts.set(p.id, { part: p, diff });
+      m.parts.set(p.id, { part: p, diff, ...(p.type === "subtask" ? { subagent: subagentActivity.get(p.childSessionId) } : {}) });
     } else if (ev.type === "message.part.delta") {
       const d = ev.data as { messageId: string; partId: string; delta: string };
       const m = messages.get(d.messageId);
@@ -66,6 +71,19 @@ function project(events: HarnessEvent[]): { messages: UiMessage[]; todos: TodoIt
       pendingEdits.set(d.path, queue);
     } else if (ev.type === "todo.updated") {
       todos = (ev.data as { todos: TodoItem[] }).todos;
+    } else if (ev.type === "subagent.started") {
+      const d = ev.data as { id: string };
+      subagentActivity.set(d.id, { steps: [] });
+    } else if (ev.type === "subagent.step") {
+      const d = ev.data as { id: string; tool: string; title?: string; state?: string };
+      const activity = subagentActivity.get(d.id) ?? { steps: [] };
+      activity.steps.push({ tool: d.tool, title: d.title, state: d.state });
+      subagentActivity.set(d.id, activity);
+    } else if (ev.type === "subagent.finished") {
+      const d = ev.data as { id: string; state: string; durationMs?: number; toolCalls?: number };
+      const activity = subagentActivity.get(d.id) ?? { steps: [] };
+      activity.finished = { state: d.state, durationMs: d.durationMs, toolCalls: d.toolCalls };
+      subagentActivity.set(d.id, activity);
     }
   }
   return {
@@ -122,7 +140,66 @@ function EditDiffCard({ path, diff }: { path: string; diff: string }) {
   );
 }
 
-function PartView({ part, diff, markdown = false, onOpenFile }: { part: Part; diff?: string; markdown?: boolean; onOpenFile?: (path: string) => void }) {
+/** 子任务可展开卡片（R3，opencode 式联动）：默认一行（agent + 描述 + 状态），
+ *  展开看任务全文 + 子会话工具步骤实时流 + 结束统计。活动数据来自
+ *  subagent.started/step/finished 事件投影（framework 桥接自子 runner）。 */
+function SubtaskCard({ part, activity }: { part: Extract<Part, { type: "subtask" }>; activity?: SubagentActivity }) {
+  const [open, setOpen] = useState(false);
+  const running = !activity?.finished;
+  const failed = activity?.finished?.state === "error";
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2"
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-ink-3">
+          <circle cx="8" cy="8" r="2" />
+          <circle cx="13.2" cy="3.5" r="1.4" />
+          <circle cx="13.2" cy="12.5" r="1.4" />
+          <path d="M9.7 7.1l2.3-2.4M9.7 8.9l2.3 2.4" />
+        </svg>
+        <span className="shrink-0 text-[0.6875rem] font-medium text-ink-2">子任务·{part.agent}</span>
+        <span className="min-w-0 flex-1 truncate text-[0.6875rem] text-ink-3" title={part.description}>{part.description}</span>
+        <span
+          className={cn(
+            "shrink-0 rounded-pill px-1.5 py-0.5 text-[0.625rem]",
+            running ? "bg-accent/15 text-accent-strong" : failed ? "bg-danger/15 text-danger" : "bg-surface-2 text-ink-3",
+          )}
+        >
+          {running ? "执行中" : failed ? "失败" : "完成"}
+        </span>
+        <svg
+          width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"
+          className={cn("shrink-0 text-ink-3 transition-transform", open && "rotate-180")}
+        >
+          <path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-line px-3 py-2">
+          <div className="whitespace-pre-wrap text-[0.6875rem] leading-5 text-ink-3">{part.prompt}</div>
+          {activity?.steps.map((step, i) => (
+            <div key={i} className="flex items-center gap-2 font-mono text-[0.625rem] text-ink-3">
+              <span className={cn("h-1 w-1 shrink-0 rounded-full", step.state === "error" ? "bg-danger" : "bg-success")} />
+              <span className="shrink-0 text-ink-2">{step.tool}</span>
+              {step.title && <span className="min-w-0 truncate">{step.title}</span>}
+            </div>
+          ))}
+          {activity?.finished && (
+            <div className="pt-1 text-[0.625rem] text-ink-3">
+              {activity.finished.toolCalls ?? activity.steps.length} 次工具调用
+              {typeof activity.finished.durationMs === "number" ? ` · ${(activity.finished.durationMs / 1000).toFixed(1)}s` : ""}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PartView({ part, diff, markdown = false, onOpenFile, subagent }: { part: Part; diff?: string; markdown?: boolean; onOpenFile?: (path: string) => void; subagent?: SubagentActivity }) {
   switch (part.type) {
     case "text":
       // assistant 正文用 Markdown（流式稳定、代码高亮）；用户消息保持纯文本
@@ -161,8 +238,9 @@ function PartView({ part, diff, markdown = false, onOpenFile }: { part: Part; di
         <ToolCard call={{ id: part.callId, tool: part.tool, state: part.state }} sessionIdle={false} />
       );
     }
-    case "subtask":
-      return <div className="text-xs text-ink-2">子任务（{part.agent}）：{part.description}</div>;
+    case "subtask": {
+      return <SubtaskCard part={part} activity={subagent} />;
+    }
     case "file":
       return <div className="text-xs text-ink-2">产物文件：{part.filename}</div>;
     case "image":
@@ -381,7 +459,7 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
           return (
             <div key={m.id} className="space-y-2.5">
               {m.parts.map((p, i) => (
-                <PartView key={i} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} />
+                <PartView key={i} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} subagent={p.subagent} />
               ))}
               {lastActive && (
                 <div className="flex items-center gap-1.5 pt-0.5 text-[0.6875rem] text-accent-strong">
