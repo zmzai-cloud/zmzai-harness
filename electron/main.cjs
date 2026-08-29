@@ -5,8 +5,7 @@
 // dev 模式：等待外部 dev server（pnpm dev 的 next dev）就绪。
 // 壳内不跑业务逻辑；本地引擎能力（MCP/终端/git，见 legacy/）保留为后续增强。
 
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
-const { spawn } = require("node:child_process");
+const { app, BrowserWindow, dialog, ipcMain, utilityProcess } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -30,7 +29,11 @@ function loadEnvFile() {
   }
 }
 
-/** 生产模式：spawn 内嵌 Next.js standalone 服务（.next/standalone/server.js）。dev 跳过（外部 next dev）。 */
+/** 生产模式：用 utilityProcess 拉起内嵌 Next.js standalone 服务（.next/standalone/server.js）。
+ *  不用 spawn + ELECTRON_RUN_AS_NODE：Electron 35+ 起 run-as-node 子进程也会向
+ *  LaunchServices 注册 Foreground app → Dock 每次多弹一个无图标的「exec」图标；
+ *  utilityProcess 是 Utility 类型（BackgroundOnly），天然无 Dock/GUI。
+ *  dev 跳过（外部 next dev）。 */
 function ensureWebServer() {
   if (!app.isPackaged) return;
   const serverEntry = path.join(app.getAppPath(), ".next", "standalone", "server.js");
@@ -42,11 +45,10 @@ function ensureWebServer() {
   loadEnvFile();
   const userData = app.getPath("userData");
   // standalone server.js 不解析 -p 参数，端口走 PORT 环境变量
-  webProcess = spawn(process.execPath, [serverEntry], {
+  webProcess = utilityProcess.fork(serverEntry, [], {
     cwd: path.dirname(serverEntry),
     env: {
       ...process.env,
-      ELECTRON_RUN_AS_NODE: "1",
       NODE_ENV: "production",
       PORT: String(WEB_PORT),
       HOSTNAME: "127.0.0.1",
@@ -58,10 +60,8 @@ function ensureWebServer() {
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
       HARNESS_WORKSPACE: path.join(userData, "workspace"),
     },
+    // inherit：stdout/stderr 转发到主进程（调试可见）
     stdio: "inherit",
-  });
-  webProcess.on("error", (err) => {
-    console.error(`[harness] 内嵌服务启动失败：${err.message}`);
   });
   webProcess.on("exit", (code) => {
     if (code !== 0 && !app.isQuitting) console.error(`[harness] 内嵌服务退出码 ${code}`);
