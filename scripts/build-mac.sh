@@ -9,7 +9,14 @@ echo "==> [0/5] 清理历史打包产物（避免 dist 累积旧版本 dmg/zip�
 bash scripts/clean-dist.sh
 
 echo "==> [1/5] next build（生产构建，含 standalone 输出）"
+# 清掉上次构建的 .next/types 与 tsbuildinfo：残留会导致类型检查阶段引用不存在的
+# 文件而 Failed to compile（File '.next/types/...' not found）
+rm -rf .next/types tsconfig.tsbuildinfo
 pnpm build
+
+# fail-fast：入口不存在就停，绝不打出会闪退的包（曾因 Next workspace root
+# 误判导致 standalone 嵌套成 zmzai-harness/server.js）
+[ -f .next/standalone/server.js ] || { echo "❌ .next/standalone/server.js 缺失，standalone 布局异常，中止打包" >&2; exit 1; }
 
 echo "==> [2/5] 组装 standalone 运行时（静态资源/页面资源拷入 standalone）"
 # next build 不自动拷贝：standalone server 按相对路径找 .next/static 与 public

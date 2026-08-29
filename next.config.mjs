@@ -1,10 +1,16 @@
 /** @type {import('next').NextConfig} */
+import { fileURLToPath } from "node:url";
+
 // 注意：用 .mjs 而非 .ts——打包后的生产运行时（next start / standalone server）
 // 加载 .ts 配置需要 typescript，缺失时会触发 next 自动 pnpm install（在安装目录
 // 里乱装包）。纯 JS 配置无此依赖。
 const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  // 固定 workspace root：上级 zmzai/ 目录存在多余 lockfile（package-lock.json）时
+  // Next 会误判 root，standalone 输出嵌套成 .next/standalone/zmzai-harness/server.js，
+  // electron 壳按 .next/standalone/server.js 找不到入口直接退出（app 闪退）。
+  outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
   // 桌面端打包：额外产出 .next/standalone（server.js + trace 出的运行时依赖，
   // 物理复制、无 symlink），Electron 壳直接 node server.js 起服务。
   output: "standalone",
