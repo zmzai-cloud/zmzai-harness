@@ -24,8 +24,8 @@ export type SessionInfo = {
 export type ToolState =
   | { status: "pending"; input: unknown }
   | { status: "running"; input: unknown; title?: string; time: { start: string } }
-  | { status: "completed"; input: unknown; output: string; title: string; time: { start: string; end: string } }
-  | { status: "error"; input: unknown; error: string; time: { start: string; end: string } };
+  | { status: "completed"; input: unknown; output: string; title: string; time: { start: string; end: string }; metadata?: Record<string, unknown> }
+  | { status: "error"; input: unknown; error: string; time: { start: string; end: string }; metadata?: Record<string, unknown> };
 
 export type Part =
   | { id: string; type: "text"; text: string; messageId: string; sessionId: string }

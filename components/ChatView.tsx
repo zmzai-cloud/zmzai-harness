@@ -122,7 +122,7 @@ function EditDiffCard({ path, diff }: { path: string; diff: string }) {
   );
 }
 
-function PartView({ part, diff, markdown = false }: { part: Part; diff?: string; markdown?: boolean }) {
+function PartView({ part, diff, markdown = false, onOpenFile }: { part: Part; diff?: string; markdown?: boolean; onOpenFile?: (path: string) => void }) {
   switch (part.type) {
     case "text":
       // assistant 正文用 Markdown（流式稳定、代码高亮）；用户消息保持纯文本
@@ -140,6 +140,22 @@ function PartView({ part, diff, markdown = false }: { part: Part; diff?: string;
       if (diff && (part.tool === "edit" || part.tool === "write")) {
         const path = (part.state.input as { path?: string } | undefined)?.path ?? "";
         return <EditDiffCard path={path} diff={diff} />;
+      }
+      // 入口截流（R2）：输出超限被截断且全文已落盘 → 提示条点击跳文件 tab 看全文
+      const meta = part.state.status === "completed" ? part.state.metadata : undefined;
+      if (meta?.truncated && typeof meta.outputPath === "string") {
+        return (
+          <div className="space-y-1">
+            <ToolCard call={{ id: part.callId, tool: part.tool, state: part.state }} sessionIdle={false} />
+            <button
+              type="button"
+              onClick={() => onOpenFile?.(meta.outputPath as string)}
+              className="text-[0.6875rem] text-accent-strong transition-colors hover:underline"
+            >
+              输出已截流{typeof meta.omittedBytes === "number" ? `（省略 ${Math.round((meta.omittedBytes as number) / 1024)}KB）` : ""}，点击在文件页查看全文 →
+            </button>
+          </div>
+        );
       }
       return (
         <ToolCard call={{ id: part.callId, tool: part.tool, state: part.state }} sessionIdle={false} />
@@ -365,7 +381,7 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
           return (
             <div key={m.id} className="space-y-2.5">
               {m.parts.map((p, i) => (
-                <PartView key={i} part={p.part} diff={p.diff} markdown />
+                <PartView key={i} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} />
               ))}
               {lastActive && (
                 <div className="flex items-center gap-1.5 pt-0.5 text-[0.6875rem] text-accent-strong">
