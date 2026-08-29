@@ -277,6 +277,8 @@ type Props = {
   /** 自治档位（P1-7）：确认 = 每次授权弹卡；自动 = 自动授 always。 */
   autoMode: boolean;
   onToggleAuto: () => void;
+  /** 乐观回显：发送瞬间的用户消息（真实 message.updated 到达后自动让位）。 */
+  echo: { text: string; images: { url: string; mediaType: string }[] } | null;
 };
 
 /** 任务计划卡：todo.updated 投影（Agent 拆解步骤的实时进度）。 */
@@ -322,8 +324,26 @@ function TodoCard({ todos }: { todos: TodoItem[] }) {
   );
 }
 
-export default function ChatView({ events, status, pending, sessionId, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto }: Props) {
+export default function ChatView({ events, status, pending, sessionId, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto, echo }: Props) {
   const { messages, todos, reads } = useMemo(() => project(events), [events]);
+  // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
+  // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
+  const visible = useMemo(() => {
+    if (!echo) return messages;
+    const echoed = messages.some(
+      (m) => m.role === "user" && m.parts.map((p) => (p.part.type === "text" ? p.part.text : "")).join("") === echo.text,
+    );
+    if (echoed) return messages;
+    const echoMessage: UiMessage = {
+      id: "__echo__",
+      role: "user",
+      parts: [
+        ...echo.images.map((im, i) => ({ part: { id: `__echo_img_${i}`, type: "image", url: im.url, mediaType: im.mediaType, messageId: "__echo__", sessionId: "" } as Part })),
+        ...(echo.text ? [{ part: { id: "__echo_text", type: "text", text: echo.text, messageId: "__echo__", sessionId: "" } as Part }] : []),
+      ],
+    };
+    return [...messages, echoMessage];
+  }, [messages, echo]);
   const running = status === "running";
   const messagesRef = useRef<HTMLDivElement | null>(null);
   // 用户消息「编辑重发」草稿：回填给 Composer，消费后清空
@@ -405,7 +425,7 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
         }}
       >
         {todos && todos.length > 0 && <TodoCard todos={todos} />}
-        {messages.length === 0 && (
+        {visible.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-2">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
@@ -418,9 +438,9 @@ export default function ChatView({ events, status, pending, sessionId, selectedM
             </div>
           </div>
         )}
-        {messages.map((m, idx) => {
+        {visible.map((m, idx) => {
           const isAssistant = m.role === "assistant";
-          const lastActive = isAssistant && idx === messages.length - 1 && running;
+          const lastActive = isAssistant && idx === visible.length - 1 && running;
           if (!isAssistant) {
             // IDE 式用户消息：右侧浅色圆角气泡（含图片附件内联展示） + hover 操作（复制/编辑回填）
             const text = m.parts

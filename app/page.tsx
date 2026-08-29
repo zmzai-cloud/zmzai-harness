@@ -54,6 +54,8 @@ export default function App() {
   // 侧栏已去代理分组：会话固定用 default agent，模型选择交给底部 Composer（默认推荐）
   const activeAgent = "default";
   const [events, setEvents] = useState<HarnessEvent[]>([]);
+  // 乐观回显：send 时暂存本条用户消息，切会话后作废
+  const [echo, setEcho] = useState<{ text: string; images: { url: string; mediaType: string }[] } | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
@@ -108,6 +110,7 @@ export default function App() {
       setEvents([]);
       setStatus("idle");
       setPending(null);
+      setEcho(null);
       return;
     }
     let cancelled = false;
@@ -118,6 +121,7 @@ export default function App() {
     setEvents([]);
     setStatus("idle");
     setPending(null);
+    setEcho(null);
     const unsub = client.subscribe(activeId, (ev) => {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
@@ -199,10 +203,16 @@ export default function App() {
         setActiveId(s.id);
         sid = s.id;
       }
+      // 乐观回显：发送瞬间显示用户气泡，真实 message.updated 到达后自动让位
+      setEcho({ text, images: images ?? [] });
       // P1-9 任务前自动快照（git 仓库且有变更时才落 commit；失败不阻塞发送）
       void client.checkpointCreate(`任务前快照 · ${text.trim().slice(0, 30) || "图片任务"}`).catch(() => undefined);
       // per-prompt 模型/推理力度覆盖：composer 选了则随本条消息下发，否则跟随代理默认
-      await client.prompt(sid, text, activeAgent, selectedModel ?? undefined, images, effort);
+      try {
+        await client.prompt(sid, text, activeAgent, selectedModel ?? undefined, images, effort);
+      } catch {
+        setEcho(null); // 发送失败：撤回乐观气泡，错误经其它途径提示
+      }
       // prompt 可能排队返回，刷新标题等元数据
       void client.listSessions().then(setSessions);
     },
@@ -317,6 +327,7 @@ export default function App() {
           onOpenFile={(path) => setOpenFileReq({ path, ts: Date.now() })}
           autoMode={autoMode}
           onToggleAuto={toggleAuto}
+          echo={echo}
         />
         <div className="hidden w-96 shrink-0 min-[1180px]:block">
           <WorkbenchPanel openRequest={openFileReq} />
