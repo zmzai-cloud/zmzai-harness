@@ -9,6 +9,7 @@ import type {
   ModelRef,
   ModelsState,
   PluginInfo,
+  PermissionSettings,
   Project,
   RelayKeyInfo,
   ProjectsState,
@@ -182,6 +183,14 @@ export const client = {
     post("/api/plugins", { action: "uninstall", name }).then((r) => j<{ ok: boolean; error?: string }>(r)),
 
   keyRotate: () => post("/api/settings/key").then((r) => j<KeyStatus & { rotated: boolean; keyMigrated: boolean }>(r)),
+
+  /** 权限自动执行配置（设置 → 通用 → 权限）：读 / 部分更新（保存即生效）。 */
+  permissionsGet: () =>
+    fetch("/api/settings/permissions").then((r) => j<{ permissions: PermissionSettings }>(r)).then((r) => r.permissions),
+  permissionsSave: (patch: PermissionSettings) =>
+    send("PUT", "/api/settings/permissions", { permissions: patch })
+      .then((r) => j<{ permissions: PermissionSettings }>(r))
+      .then((r) => r.permissions),
 
   /** relay 账号联动：key 列表 / 一键签发并绑定（明文只在 relay 响应中转一次）。 */
   relayKeys: () => fetch("/api/settings/keys").then((r) => j<RelayKeyInfo>(r)),

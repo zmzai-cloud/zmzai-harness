@@ -143,6 +143,19 @@ export type GitDiff = { available: boolean; files: DiffFile[]; diff: string; tru
 /** 个人 key 状态（仅掩码回显）。 */
 export type KeyStatus = { configured: boolean; masked: string | null; relayUrl?: string; ollamaUrl?: string | null };
 
+/** 权限自动执行配置（设置 → 通用 → 权限）：域 → ask 逐次确认 / auto 自动始终允许。 */
+export type PermissionDomain = "terminal" | "edit" | "task" | "gitWrite";
+export type PermissionAction = "ask" | "auto";
+export type PermissionSettings = Partial<Record<PermissionDomain, PermissionAction>>;
+/** framework 权限键 → 设置域（未映射的键不受细粒度配置影响，仍逐次确认）。 */
+export const PERMISSION_DOMAIN_OF: Record<string, PermissionDomain> = {
+  bash: "terminal",
+  terminal: "terminal",
+  edit: "edit",
+  task: "task",
+  git_write: "gitWrite",
+};
+
 /** relay 账号下的 API key（控制面列表，prefix 掩码；明文只在签发时一次性返回）。 */
 export type RelayKeyInfo = {
   loggedIn: boolean;

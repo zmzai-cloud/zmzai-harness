@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { dataDir } from "./runtime-constants";
+import type { PermissionAction, PermissionDomain, PermissionSettings } from "./types";
 
 const settingsFile = resolve(dataDir, "settings.json");
 const secretFile = resolve(dataDir, ".secret");
@@ -50,7 +51,7 @@ function decrypt(encoded: string): string | null {
 
 /** ---- settings.json 读写（明文自动迁移为密文） ---- */
 
-type StoredSettings = { personalKeyEnc?: string; personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string };
+type StoredSettings = { personalKeyEnc?: string; personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string; permissions?: Partial<Record<PermissionDomain, PermissionAction>> };
 
 function readStored(): StoredSettings {
   try {
@@ -81,6 +82,31 @@ function read(): HarnessSettings {
 
 export function getSettings(): HarnessSettings {
   return read();
+}
+
+/** ---- 权限自动执行（设置 → 通用 → 权限）：持久化在 settings.json，保存即生效 ---- */
+
+const PERMISSION_DOMAINS: PermissionDomain[] = ["terminal", "edit", "task", "gitWrite"];
+
+export function getPermissions(): PermissionSettings {
+  const stored = readStored().permissions;
+  const out: PermissionSettings = {};
+  if (stored) {
+    for (const domain of PERMISSION_DOMAINS) {
+      if (stored[domain] === "auto" || stored[domain] === "ask") out[domain] = stored[domain];
+    }
+  }
+  return out;
+}
+
+export function savePermissions(patch: PermissionSettings): PermissionSettings {
+  const stored = readStored();
+  const merged: Partial<Record<PermissionDomain, PermissionAction>> = { ...(stored.permissions ?? {}) };
+  for (const domain of PERMISSION_DOMAINS) {
+    if (patch[domain] === "auto" || patch[domain] === "ask") merged[domain] = patch[domain];
+  }
+  write({ ...stored, permissions: merged });
+  return getPermissions();
 }
 
 /** 掩码展示（UI 只回显尾部 4 位）。 */

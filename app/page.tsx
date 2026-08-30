@@ -11,7 +11,8 @@ import ChatView from "@/components/ChatView";
 import WorkbenchPanel from "@/components/WorkbenchPanel";
 import AccountBlock from "@/components/AccountBlock";
 import { client } from "@/lib/client";
-import type { SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus, ModelRef, ThinkingEffort } from "@/lib/types";
+import type { SessionInfo, PermissionRequest, PermissionSettings, HarnessEvent, ModelRef, ThinkingEffort, TranscriptMessage, AuthStatus } from "@/lib/types";
+import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
@@ -64,6 +65,10 @@ export default function App() {
   const [openFileReq, setOpenFileReq] = useState<{ path: string; ts: number } | null>(null);
   // P1-7 自治档位：自动 = 授权请求自动「始终允许」
   const [autoMode, setAutoMode] = useState(false);
+  // 设置 → 通用 → 权限：细粒度自动执行配置（terminal/edit/task/gitWrite）。
+  // ref 镜像：SSE 订阅闭包读最新值，配置变更不重订阅。
+  const [permAuto, setPermAuto] = useState<PermissionSettings>({});
+  const permAutoRef = useRef<PermissionSettings>({});
   // P2-12 命令面板
   const [palette, setPalette] = useState<"commands" | "files" | null>(null);
   const paletteActionsRef = useRef<{ newSession: () => void }>({ newSession: () => undefined });
@@ -74,10 +79,14 @@ export default function App() {
     void client.authStatus().then(setAuth);
   }, []);
 
-  // 自治档位持久化（localStorage，纯前端语义）
+  // 自治档位持久化（localStorage，纯前端语义）+ 权限自动执行配置（settings.json）
   useEffect(() => {
     setAutoMode(window.localStorage.getItem("harness.autoMode") === "1");
     setSidebarOpen(window.localStorage.getItem("harness.sidebar") !== "0");
+    void client.permissionsGet().then((permissions) => {
+      setPermAuto(permissions);
+      permAutoRef.current = permissions;
+    }).catch(() => undefined);
   }, []);
   const toggleAuto = useCallback(() => {
     setAutoMode((v) => {
@@ -126,8 +135,9 @@ export default function App() {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
         const req = (ev.data as { request: PermissionRequest }).request;
-        // P1-7 自动档：直接「始终允许」，不打断工作流
-        if (autoMode) {
+        // P1-7 自动档：全部「始终允许」；细粒度权限（设置 → 通用）：命中的域自动「始终允许」
+        const domain = PERMISSION_DOMAIN_OF[req.permission];
+        if (autoMode || (domain && permAutoRef.current[domain] === "auto")) {
           void client.replyPermission(activeId, req.id, "always").catch(() => undefined);
         } else {
           setPending(req);

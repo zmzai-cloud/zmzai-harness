@@ -6,7 +6,7 @@ import { Button, Navbar } from "@zmzai/theme";
 
 import AccountBlock from "@/components/AccountBlock";
 import { client } from "@/lib/client";
-import type { KeyStatus, McpStatuses, PluginInfo, RelayKeyInfo } from "@/lib/types";
+import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo } from "@/lib/types";
 
 /**
  * 设置中心（独立页，替代旧版弹窗）：左侧导航 + 右侧分区内容。
@@ -37,6 +37,47 @@ function Card({ title, desc, children }: { title: string; desc?: string; childre
 const inputClass =
   "h-9 min-w-0 flex-1 rounded-sm border border-line bg-bg px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-ink";
 
+const selectClass =
+  "h-8 w-36 shrink-0 rounded-sm border border-line bg-bg px-2 text-xs text-ink outline-none focus:border-ink";
+
+/** 权限与自动执行（Qoder 同款）：敏感操作域可各自配置「逐次确认 / 自动执行」。
+ *  对应 framework 权限键：terminal+bash / edit / task / git_write。 */
+const PERM_ROWS: { domain: PermissionDomain; title: string; desc: string }[] = [
+  { domain: "terminal", title: "终端", desc: "所有终端命令（bash 与交互式终端）自动运行，无需审批。" },
+  { domain: "edit", title: "文件编辑", desc: "写文件 / 编辑文件自动执行，不再逐次确认。" },
+  { domain: "task", title: "计划智能体", desc: "派生子代理执行子任务时自动运行。" },
+  { domain: "gitWrite", title: "Git 写操作", desc: "commit 等写操作自动执行（diff 仍可在产物面板审查）。" },
+];
+
+function PermCard({ perm, onChange }: { perm: PermissionSettings; onChange: (domain: PermissionDomain, value: "ask" | "auto") => void }) {
+  return (
+    <section className="mb-8">
+      <h2 className="mb-1 text-base font-semibold text-ink">权限与自动执行</h2>
+      <p className="mb-3 text-xs leading-5 text-ink-3">
+        默认所有敏感操作逐次确认；将域切到「自动执行」后授权请求自动「始终允许」，工作流不再被打断。配置保存在 settings.json，全会话生效。
+      </p>
+      <div className="overflow-hidden rounded-md border border-line bg-surface">
+        {PERM_ROWS.map((row, i) => (
+          <div key={row.domain} className={"flex items-center gap-3 px-4 py-3 " + (i > 0 ? "border-t border-line" : "")}>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-ink">{row.title}</div>
+              <div className="mt-0.5 text-xs leading-5 text-ink-3">{row.desc}</div>
+            </div>
+            <select
+              value={perm[row.domain] ?? "ask"}
+              onChange={(e) => onChange(row.domain, e.target.value as "ask" | "auto")}
+              className={selectClass}
+            >
+              <option value="ask">每次确认</option>
+              <option value="auto">自动执行</option>
+            </select>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const fmtMicros = (v: number) => (v >= 1_000_000 ? `¥${(v / 1_000_000).toFixed(2)}` : `¥${(v / 1_000_000).toFixed(4)}`);
 
 export default function SettingsPage() {
@@ -48,6 +89,9 @@ export default function SettingsPage() {
   // ===== 通用：relay 端点 =====
   const [relayDraft, setRelayDraft] = useState("");
   const [relaySaved, setRelaySaved] = useState(false);
+  // ===== 通用：权限与自动执行 =====
+  const [perm, setPerm] = useState<PermissionSettings>({});
+  const [permSaved, setPermSaved] = useState(false);
   // ===== 模型与凭据 =====
   const [keyDraft, setKeyDraft] = useState("");
   const [ollamaDraft, setOllamaDraft] = useState("");
@@ -78,6 +122,7 @@ export default function SettingsPage() {
     }).catch(() => undefined);
     void client.mcpStatus().then(setMcp).catch(() => undefined);
     void client.pluginsList().then((r) => setPlugins(r.plugins)).catch(() => undefined);
+    void client.permissionsGet().then(setPerm).catch(() => undefined);
     refreshRelayKeys();
   }, [refreshRelayKeys]);
 
@@ -106,6 +151,13 @@ export default function SettingsPage() {
       setStatus(await client.keySaveRelay(null));
       setRelayDraft(status?.relayUrl ?? "");
       setRelaySaved(true);
+    });
+
+  // 权限域切换（保存即生效，进行中会话的下一次授权请求就按新档位处理）
+  const setPermDomain = (domain: PermissionDomain, value: "ask" | "auto") =>
+    void run(async () => {
+      setPerm(await client.permissionsSave({ [domain]: value }));
+      setPermSaved(true);
     });
 
   const saveKey = () =>
@@ -286,6 +338,8 @@ export default function SettingsPage() {
                     <div>申请入口：relay 控制台 → API Keys → 新建 key（zrk_ 开头），配「模型与凭据」里的个人 key 使用。</div>
                   </div>
                 </Card>
+                <PermCard perm={perm} onChange={setPermDomain} />
+                {permSaved && <div className="-mt-5 mb-6 text-[0.6875rem] text-success">权限配置已保存，立即生效。</div>}
                 <Card title="关于" desc="harness 本地工作台：Agent 对话、文件/Git 审查、MCP、插件均在本页所在服务完成。">
                   <div className="text-[0.6875rem] leading-5 text-ink-3">
                     <div>数据目录：data/（settings.json 0600、zmzai.db WAL、.secret 密钥文件）</div>
