@@ -26,12 +26,19 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   return NextResponse.json({ ok: true });
 }
 
-/** DELETE /api/sessions/[id] — 删除会话及其消息/片段（jsonl 三处落盘一起清）。
- *  jsonl-store 无 delete 方法，这里直接按文件布局清理（单进程本地应用）。 */
+/** DELETE /api/sessions/[id] — 删除会话及其消息/片段。
+ *  存储现在是 SQLite（zmzai.db）：必须走 store.deleteSession 级联删三表；
+ *  旧 JSONL 文件仍一并清扫（不删的话，空库重新导入时会把已删会话复活）。 */
 export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!SAFE_ID.test(id)) return NextResponse.json({ error: "非法会话 id" }, { status: 400 });
 
+  const runtime = cloudRuntime();
+  const existing = await runtime.store.getSession(id);
+  if (!existing) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
+  await runtime.store.deleteSession?.(id);
+
+  // 遗留 JSONL 清扫（store 未实现 deleteSession 的后端也能清到文件层）
   const dir = dataDirFor(getActiveProject());
   await rm(path.join(dir, "sessions", `${id}.json`), { force: true });
   for (const kind of ["messages", "parts"] as const) {

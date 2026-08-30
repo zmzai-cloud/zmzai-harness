@@ -36,6 +36,18 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const model = body?.model ?? (await resolveModel(body?.agent, cookieHeader));
   const runtime = cloudRuntime();
 
+  // 自动标题：会话还是默认名「新会话」时，用首条用户消息摘要作标题；
+  // 纯图片消息给固定文案。失败不阻塞发送（下次 prompt 会重试）。
+  try {
+    const ses = await runtime.store.getSession(id);
+    if (ses && (!ses.title || ses.title === "新会话")) {
+      const seed = text || (images.length ? "[图片消息]" : "");
+      if (seed) await runtime.store.updateSession(id, { title: seed.replace(/\s+/g, " ").slice(0, 30) });
+    }
+  } catch {
+    /* 标题生成失败不阻塞发送 */
+  }
+
   try {
     await withRequestCookie(cookieHeader, () =>
       runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}) }),
