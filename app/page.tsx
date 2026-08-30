@@ -213,8 +213,9 @@ export default function App() {
       } catch {
         setEcho(null); // 发送失败：撤回乐观气泡，错误经其它途径提示
       }
-      // prompt 可能排队返回，刷新标题等元数据
+      // prompt 可能排队返回，刷新标题等元数据；AI 摘要标题异步落库，延迟再刷一次
       void client.listSessions().then(setSessions);
+      setTimeout(() => void client.listSessions().then(setSessions), 4000);
     },
     [activeId, activeAgent, auth?.loggedIn, selectedModel],
   );

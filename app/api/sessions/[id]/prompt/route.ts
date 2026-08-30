@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveModel, sessionCookieName } from "@/lib/relay";
 import { cloudRuntime } from "@/lib/runtime";
 import { withRequestCookie } from "@/lib/request-cookie";
+import { generateSessionTitle } from "@/lib/session-title";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,22 +37,39 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const model = body?.model ?? (await resolveModel(body?.agent, cookieHeader));
   const runtime = cloudRuntime();
 
-  // 自动标题：会话还是默认名「新会话」时，用首条用户消息摘要作标题；
-  // 纯图片消息给固定文案。失败不阻塞发送（下次 prompt 会重试）。
+  // 自动标题（两段式）：①先落占位标题（首条消息摘要，立即生效不叫「新会话」）；
+  // ②prompt 发出后异步调 LLM 生成 AI 摘要标题覆盖（见 lib/session-title.ts）。
+  // 生成失败保留占位；用户已手动改名则不覆盖。
+  let autoTitleSeed: string | null = null;
   try {
     const ses = await runtime.store.getSession(id);
     if (ses && (!ses.title || ses.title === "新会话")) {
       const seed = text || (images.length ? "[图片消息]" : "");
-      if (seed) await runtime.store.updateSession(id, { title: seed.replace(/\s+/g, " ").slice(0, 30) });
+      if (seed) {
+        autoTitleSeed = seed.replace(/\s+/g, " ").slice(0, 30);
+        await runtime.store.updateSession(id, { title: autoTitleSeed });
+      }
     }
   } catch {
-    /* 标题生成失败不阻塞发送 */
+    /* 占位标题失败不阻塞发送 */
   }
 
   try {
     await withRequestCookie(cookieHeader, () =>
       runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}) }),
     );
+    // AI 摘要标题：后台生成不阻塞响应；仅当标题仍是占位时覆盖
+    if (autoTitleSeed && text) {
+      void generateSessionTitle(runtime, id, text)
+        .then((title) => {
+          if (!title) return undefined;
+          return runtime.store.getSession(id).then((ses) => {
+            if (ses && ses.title === autoTitleSeed) return runtime.store.updateSession(id, { title });
+            return undefined;
+          });
+        })
+        .catch(() => undefined);
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "发送失败";
