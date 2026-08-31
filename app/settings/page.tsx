@@ -384,7 +384,7 @@ export default function SettingsPage() {
                       onKeyDown={(e) => {
                         if (e.key === "Enter") saveRelay();
                       }}
-                      placeholder="https://m.zmzai.cloud/api/v1"
+                      placeholder="https://relay.zmzai.cloud/api/v1"
                       spellCheck={false}
                       autoComplete="off"
                       className={inputClass}

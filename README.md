@@ -7,7 +7,7 @@
 ## 形态与同构架构
 
 ```
-浏览器 (Web)  ─┐                    ┌─→ relay (m.zmzai.cloud)  ─→  OpenAI 兼容模型
+浏览器 (Web)  ─┐                    ┌─→ relay (relay.zmzai.cloud)  ─→  OpenAI 兼容模型
                ├─ HTTP / SSE ─→  Next.js (3100)      ─┤   （cookie 透传鉴权）
 Electron (App) ┘  同一套页面           │
                                     └─→ muzhi (muzhi.zmzai.cloud)  登录 / 会话配额
@@ -43,7 +43,7 @@ corepack pnpm build:mac      # 打包 macOS dmg + zip（arm64，产物在 dist/�
 
 ### 环境（默认接正式环境）
 
-`.env` 默认连正式环境（用户只有一个环境，dev 即用生产）：`OPENAI_BASE_URL=https://m.zmzai.cloud/api/v1`（relay 推理/模型目录）+ `MUZHI_URL=https://muzhi.zmzai.cloud`（登录）。本地调试可切回 `http://127.0.0.1:3003` / `http://127.0.0.1:3000`（需自起 mongod 27017 / muzhi / relay）。会话持久化 `ZMZAI_DATA_DIR`（默认 `./.harness-data`）、Agent 工作区 `ZMZAI_WORKSPACE`（默认 `./.workspace`）；打包应用内两者自动重定向到系统用户数据目录。
+`.env` 默认连正式环境（用户只有一个环境，dev 即用生产）：`OPENAI_BASE_URL=https://relay.zmzai.cloud/api/v1`（relay 推理/模型目录）+ `MUZHI_URL=https://muzhi.zmzai.cloud`（登录）。本地调试可切回 `http://127.0.0.1:3003` / `http://127.0.0.1:3000`（需自起 mongod 27017 / muzhi / relay）。会话持久化 `ZMZAI_DATA_DIR`（默认 `./.harness-data`）、Agent 工作区 `ZMZAI_WORKSPACE`（默认 `./.workspace`）；打包应用内两者自动重定向到系统用户数据目录。
 
 ### 发布（构建 → OSS 上传 → 直链）
 
