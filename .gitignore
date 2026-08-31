@@ -15,3 +15,5 @@ components.d.ts
 *.tsbuildinfo
 # 会话数据（JSONL）
 data/
+.env.release
+.fw-revisions.json

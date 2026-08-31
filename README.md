@@ -45,9 +45,17 @@ corepack pnpm build:mac      # 打包 macOS dmg + zip（arm64，产物在 dist/�
 
 `.env` 默认连正式环境（用户只有一个环境，dev 即用生产）：`OPENAI_BASE_URL=https://m.zmzai.cloud/api/v1`（relay 推理/模型目录）+ `MUZHI_URL=https://muzhi.zmzai.cloud`（登录）。本地调试可切回 `http://127.0.0.1:3003` / `http://127.0.0.1:3000`（需自起 mongod 27017 / muzhi / relay）。会话持久化 `ZMZAI_DATA_DIR`（默认 `./.harness-data`）、Agent 工作区 `ZMZAI_WORKSPACE`（默认 `./.workspace`）；打包应用内两者自动重定向到系统用户数据目录。
 
-### macOS 打包（scripts/build-mac.sh）
+### 发布（构建 → OSS 上传 → 直链）
 
-流程：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/zmzai Harness-0.2.0-arm64.dmg` + zip。
+1. `cp scripts/.env.release.example .env.release` 并填写 OSS 配置（bucket 保持私有，脚本按**对象级 public-read** 上传，直链不过期；KEY/SECRET 可复用 muzhi 的）
+2. macOS：`bash scripts/release.sh`（构建 + 上传 + 生成 SHA256SUMS 与直链清单）；Windows：`powershell -File scripts\build-win.ps1 -Upload`
+3. 上传完成后 `dist/release-links.md` 里有全部直链（`releases/harness/v<version>/…`），更新到 landing page 下载区
+4. 辅助：`node scripts/upload-oss.mjs --dry` 只列清单不上传；`--skip-build` 补传现有产物
+
+### macOS / Windows 打包
+
+- **macOS**（scripts/build-mac.sh）：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/zmzai Harness-0.2.0-arm64.dmg` + zip（arm64）。
+- **Windows**（`pnpm build:win`，在 Windows 机器上跑）：同构流程（scripts/build-win.ps1），产物：NSIS 安装器 exe（可选安装目录 + 桌面快捷方式）+ zip（x64）。未签名，SmartScreen 首次运行提示「仍要运行」属预期。
 
 ## 相关仓库
 
