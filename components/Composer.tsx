@@ -491,7 +491,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       )}
 
       {/* 输入卡片：textarea 内嵌 + 底部工具行（opencode/Claude 式：与消息列同宽居中） */}
-      <div className="mx-auto max-w-3xl rounded-xl border border-line bg-surface transition-colors focus-within:border-line-strong">
+      <div className="mx-auto w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl rounded-xl border border-line bg-surface transition-colors focus-within:border-line-strong">
         {/* 图片附件预览 chips */}
         {images.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">

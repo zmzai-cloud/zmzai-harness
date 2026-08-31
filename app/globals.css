@@ -100,6 +100,24 @@ html[data-theme="dark"] {
     box-sizing: border-box;
   }
 
+  /* 全局字号：IDE 密度下浏览器默认 16px 偏小，抬到 17px——
+   * 全站 rem 计字号/间距（含 text-[0.625rem] 等任意值）统一放大 ~6%。 */
+  html {
+    font-size: 17px;
+  }
+
+  /* 深色主题品牌 logo 反白：theme Logo 是黑色 PNG，其 inverted prop 只服务
+   * BrandLockup 的 tone="dark"（墨底载体）语义，不响应应用主题；
+   * 这里在消费端按主题补 filter 反白（显式 dark + 跟随系统两种路径都要覆盖）。 */
+  html[data-theme="dark"] img[alt="zmzai"] {
+    filter: invert(1);
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) img[alt="zmzai"] {
+      filter: invert(1);
+    }
+  }
+
   html,
   body {
     height: 100%;

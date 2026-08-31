@@ -391,7 +391,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
         </div>
       )}
       <div
-        className="messages max-w-3xl flex-1 space-y-7 overflow-y-auto px-6 py-6"
+        className="messages mx-auto w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl flex-1 space-y-7 overflow-y-auto px-6 py-6"
         ref={messagesRef}
         onScroll={(e) => {
           // 触顶自动加载更早历史（hasMore 且未在加载中——防抖在 page 层）
