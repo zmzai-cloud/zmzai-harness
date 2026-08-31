@@ -95,6 +95,8 @@ const client = new OSS({
   accessKeySecret: env.OSS_ACCESS_KEY_SECRET,
   stsToken: env.OSS_SESSION_TOKEN || undefined,
   secure: true,
+  // 大安装包（300MB+）PUT 耗时远超默认 60s，放宽到 10 分钟
+  timeout: 600000,
   // authorizationV4: true, // 用默认 V3（V4 未真实验证）
 });
 
