@@ -42,6 +42,18 @@ ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}" \
 CSC_IDENTITY_AUTO_DISCOVERY=false \
 pnpm exec electron-builder --mac --arm64 --publish never
 
-echo "==> [5/5] 产物"
+echo "==> [5/6] ad-hoc 深度签名（无开发者证书，封印 Bundle 资源）"
+# electron-builder 在 CSC_IDENTITY_AUTO_DISCOVERY=false 下完全跳过签名，产物只有
+# 主执行文件的 linker 临时签名（Sealed Resources=none）。包级未封印 + 浏览器下载
+# 隔离标记会触发 Gatekeeper「已损坏，无法打开」。这里做完整 ad-hoc 签名保证完整性
+# 校验通过。注意：无 Developer ID + 公证，下载场景仍需 xattr 清隔离（见 README）。
+APP_PATH=$(find dist -maxdepth 2 -name "*.app" -type d | head -1)
+if [ -n "$APP_PATH" ]; then
+  codesign --force --deep --sign - "$APP_PATH"
+  codesign --verify --deep --strict "$APP_PATH"
+  echo "ad-hoc 签名通过：$APP_PATH"
+fi
+
+echo "==> [6/6] 产物"
 ls -lh dist/*.dmg dist/*.zip
 echo "完成。安装：双击 dist/*.dmg 拖入 Applications；或直接运行 dist/mac-arm64/Lectern.app"

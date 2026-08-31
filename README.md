@@ -54,7 +54,8 @@ corepack pnpm build:mac      # 打包 macOS dmg + zip（arm64，产物在 dist/�
 
 ### macOS / Windows 打包
 
-- **macOS**（scripts/build-mac.sh）：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/Lectern-0.2.0-arm64.dmg`（历史产物仍为 zmzai Harness-*） + zip（arm64）。
+- **macOS**（scripts/build-mac.sh）：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书）→ ad-hoc 深度签名（`codesign --force --deep --sign -`，封印 Bundle 资源保证完整性校验通过）。产物：`dist/Lectern-0.2.0-arm64.dmg`（历史产物仍为 zmzai Harness-*） + zip（arm64）。
+  - **下载后提示「已损坏，无法打开」**：未做 Developer ID 签名与公证，浏览器下载会带隔离标记，Gatekeeper 对未签名包直接判损坏（Apple Silicon 标准行为，包本身没坏）。解法：`xattr -cr "/Applications/Lectern.app"`（历史包路径为 `"/Applications/zmzai Harness.app"`）。彻底消除需付费 Apple Developer 账号做签名 + 公证。
 - **Windows**（`pnpm build:win`，在 Windows 机器上跑）：同构流程（scripts/build-win.ps1），产物：NSIS 安装器 exe（可选安装目录 + 桌面快捷方式）+ zip（x64）。未签名，SmartScreen 首次运行提示「仍要运行」属预期。
 
 ## 相关仓库
