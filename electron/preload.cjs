@@ -7,4 +7,13 @@ contextBridge.exposeInMainWorld("harnessNative", {
 
   /** 任务完成系统通知（主进程 Notification——Electron 下 Web 通知未聚焦时不可靠）。 */
   notifyTaskDone: () => ipcRenderer.send("notify:taskDone"),
+
+  /** SSO 登录：打开 auth.zmzai.cloud 子窗口（GitHub OAuth / 邮箱密码）。
+   *  返回已有共享会话 cookie 值或 null；登录完成（cookie 变化）经 onSsoCookie 回调送达。 */
+  openAuthWindow: () => ipcRenderer.invoke("auth:openSSO"),
+
+  /** 订阅 SSO 会话 cookie（主进程从 auth 域 session 捕获后推送，值只经内存不落盘）。 */
+  onSsoCookie: (callback) => {
+    ipcRenderer.on("auth:ssoCookie", (_event, value) => callback(value));
+  },
 });

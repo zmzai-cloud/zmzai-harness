@@ -190,6 +190,10 @@ export type HarnessNativeBridge = {
   pickFolder?: () => Promise<string | null>;
   /** 任务完成系统通知（主进程 Notification；仅 Electron 宿主存在）。 */
   notifyTaskDone?: () => void;
+  /** SSO 登录：打开 auth 子窗口；立即返回已有共享会话 cookie 值（登录过）或 null。 */
+  openAuthWindow?: () => Promise<string | null>;
+  /** 订阅 SSO 会话 cookie：主进程捕获 auth 域会话 cookie 后推送。 */
+  onSsoCookie?: (callback: (value: string) => void) => void;
 };
 
 declare global {

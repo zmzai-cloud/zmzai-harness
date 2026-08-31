@@ -72,7 +72,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
         <div className="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-md border border-line bg-surface p-1 shadow-lg ring-1 ring-line">
           <div className="px-2.5 pb-2 pt-2">
             <div className="truncate text-xs font-medium text-ink">{auth?.user?.name ?? "未登录"}</div>
-            <div className="truncate text-[0.625rem] text-ink-3">{auth?.user?.email ?? "登录 relay 后可同步账号能力"}</div>
+            <div className="truncate text-[0.625rem] text-ink-3">{auth?.user?.email ?? "登录后可同步账号能力"}</div>
           </div>
           <div className="border-t border-line py-1">
             <div className="px-2.5 pb-1 pt-1.5 text-[0.625rem] text-ink-3">主题</div>
@@ -113,7 +113,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
                 onClick={() => setMenu(false)}
                 className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
               >
-                登录 relay
+                用户登录
               </Link>
             )}
           </div>
@@ -133,7 +133,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line text-xs text-ink-3">?</span>
         )}
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-[0.6875rem] font-medium text-ink">{auth?.user?.name ?? "未登录 relay"}</span>
+          <span className="block truncate text-[0.6875rem] font-medium text-ink">{auth?.user?.name ?? "未登录"}</span>
           <span className="block truncate text-[0.625rem] text-ink-3">{auth?.loggedIn ? "登录会话可用" : "可配置个人 key 直连"}</span>
         </span>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="shrink-0 text-ink-3">
