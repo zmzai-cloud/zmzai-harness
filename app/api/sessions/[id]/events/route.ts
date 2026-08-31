@@ -7,20 +7,41 @@ import { cloudRuntime } from "@/lib/runtime";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** SSE 事件流：UI 的 window.harness.subscribe 同构替代（EventSource）。 */
+const HEARTBEAT_MS = 15_000;
+
+/**
+ * SSE 事件流：UI 的 window.harness.subscribe 同构替代（EventSource）。
+ *
+ * 断线续传：`?since=<seq>` 从该序号之后重放（subscribeEventLog 的 sinceSeq
+ * 重放 + live 合并），客户端重连时带上最后收到的 seq 即可无缺口恢复。
+ * 每帧写 `id: <seq>`；每 15s 发注释帧保活，防代理/系统休眠切断空闲连接
+ * （注释帧不触发 EventSource.onmessage，纯保活）。
+ */
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const runtime = cloudRuntime();
   const encoder = new TextEncoder();
 
+  const sinceRaw = Number(new URL(request.url).searchParams.get("since") ?? "0");
+  const sinceSeq = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : 0;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": ping\n\n"));
+        } catch {
+          /* stream 已关闭 */
+        }
+      }, HEARTBEAT_MS);
       try {
-        for await (const ev of subscribeEventLog(runtime.eventLog, id, { signal: request.signal })) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`));
+        for await (const ev of subscribeEventLog(runtime.eventLog, id, { signal: request.signal, sinceSeq })) {
+          controller.enqueue(encoder.encode(`id: ${ev.seq}\ndata: ${JSON.stringify(ev)}\n\n`));
         }
       } catch {
         /* 客户端断开等异常：直接结束流 */
+      } finally {
+        clearInterval(heartbeat);
       }
       try {
         controller.close();

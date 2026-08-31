@@ -14,7 +14,7 @@ type Checkpoint = { hash: string; time: string; subject: string; checkpoint: boo
  * 文件列表（+/- 统计）→ 点击进入逐文件 diff；非 git 仓库降级提示。
  * 顶部检查点条（P1-9）：列出快照 commit，支持一键回滚（二次确认）。
  */
-export default function ReviewPane() {
+export default function ReviewPane({ editedPaths = [] }: { editedPaths?: string[] }) {
   const [data, setData] = useState<GitDiff | null>(null);
   const [selected, setSelected] = useState<DiffFile | null>(null);
   const [fileDiff, setFileDiff] = useState<string>("");
@@ -168,7 +168,7 @@ export default function ReviewPane() {
       )}
 
       {selected ? (
-        <DiffView diff={fileDiff} />
+        <DiffView diff={fileDiff} path={selected?.path} />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {files.length === 0 && (
@@ -176,25 +176,32 @@ export default function ReviewPane() {
               Agent 修改文件后，变更会出现在这里供审查。
             </div>
           )}
-          {files.map((f) => (
-            <button
-              key={f.path}
-              type="button"
-              onClick={() => void openFile(f)}
-              className="mb-0.5 flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={f.path}>
-                {f.path}
-              </span>
-              {f.binary ? (
-                <span className="shrink-0 text-[0.625rem] text-ink-3">binary</span>
-              ) : (
-                <span className="shrink-0 font-mono text-[0.625rem]">
-                  <span className="text-success">+{f.additions}</span> <span className="text-danger">-{f.deletions}</span>
+          {files.map((f) => {
+            const touched = editedPaths.includes(f.path); // F4：本轮 Agent 触碰的文件高亮
+            return (
+              <button
+                key={f.path}
+                type="button"
+                onClick={() => void openFile(f)}
+                className={cn(
+                  "mb-0.5 flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2",
+                  touched && "bg-live-tint/60",
+                )}
+              >
+                {touched && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-live" title="本轮 Agent 触碰" />}
+                <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={f.path}>
+                  {f.path}
                 </span>
-              )}
-            </button>
-          ))}
+                {f.binary ? (
+                  <span className="shrink-0 text-[0.625rem] text-ink-3">binary</span>
+                ) : (
+                  <span className="shrink-0 font-mono text-[0.625rem]">
+                    <span className="text-success">+{f.additions}</span> <span className="text-danger">-{f.deletions}</span>
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

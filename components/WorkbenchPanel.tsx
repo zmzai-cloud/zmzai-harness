@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
@@ -66,44 +66,111 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
+/** 文件 Tab 栈的单个标签（F1：多文件并行查看，LRU 上限 8）。 */
+type FileTab = { path: string; content: string; size: number };
+
+const MAX_FILE_TABS = 8;
+
+/** 带行号的纯文本预览（F3：path:line 锚点滚动定位）。 */
+function NumberedPreview({ content, anchorLine }: { content: string; anchorLine?: number }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const lines = content.split("\n");
+  useEffect(() => {
+    if (!anchorLine || !ref.current) return;
+    ref.current.querySelector(`[data-line="${anchorLine}"]`)?.scrollIntoView({ block: "center" });
+  }, [anchorLine, content]);
+  return (
+    <div ref={ref} className="min-h-0 flex-1 overflow-auto py-1">
+      {lines.map((l, i) => (
+        <div
+          key={i}
+          data-line={i + 1}
+          className={cn("flex px-2 font-mono text-xs leading-5", anchorLine === i + 1 && "bg-warning-tint")}
+        >
+          <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-3">{i + 1}</span>
+          <span className="whitespace-pre-wrap break-all text-ink-2">{l || " "}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
- * 产物侧工作台：审查（git diff）/ 文件（树+预览+编辑）/ 画布（HTML 产物渲染）/ 终端（xterm）。
+ * 产物侧工作台：审查（git diff）/ 文件（树 + Tab 栈预览/编辑）/ 画布 / 地图 / 终端。
  * 「画布打开」把文件 Tab 的 HTML 产物送进画布 Tab；openRequest 是外部联动
- * （消息内路径点击 / ⌘P 文件快开）请求打开某个文件。
+ * （消息内路径点击 / ⌘P 文件快开 / 工具卡路径）请求打开某个文件（可带行号）。
  */
-export default function WorkbenchPanel({ openRequest }: { openRequest?: { path: string; ts: number } | null }) {
+export default function WorkbenchPanel({
+  openRequest,
+  editedPaths,
+}: {
+  openRequest?: { path: string; ts: number; line?: number } | null;
+  /** 本轮 Agent 触碰过的文件（file.edited 投影，最新在前）——文件 Tab 顶部 chips + Git 高亮。 */
+  editedPaths?: string[];
+}) {
   const [tab, setTab] = useState<Tab>("review");
-  const [preview, setPreview] = useState<{ path: string; content: string; size: number } | null>(null);
+  const [fileTabs, setFileTabs] = useState<FileTab[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [canvasPath, setCanvasPath] = useState<string | null>(null);
   const loadSeq = useRef(0);
 
-  // 外部联动：打开指定文件（切到文件 Tab 并加载）
-  useEffect(() => {
-    if (!openRequest) return;
+  const activeFile = fileTabs.find((t) => t.path === activePath) ?? null;
+
+  // 外部联动：打开指定文件（切到文件 Tab、LRU 入栈并激活；line 用于锚点滚动）
+  const [anchorLine, setAnchorLine] = useState<number | undefined>(undefined);
+  const openFile = useCallback((path: string, line?: number) => {
     const seq = ++loadSeq.current;
     setTab("files");
     setEditing(false);
+    setAnchorLine(line);
+    setActivePath(path);
     void client
-      .fsFile(openRequest.path)
+      .fsFile(path)
       .then((f) => {
         if (seq !== loadSeq.current) return;
-        setPreview({ path: f.path, content: f.content, size: f.size });
+        setFileTabs((prev) => {
+          const idx = prev.findIndex((t) => t.path === f.path);
+          const kept = prev.filter((t) => t.path !== f.path);
+          kept.unshift({ path: f.path, content: f.content, size: f.size });
+          // LRU 挤出时，若当前激活 tab 恰好被挤走，激活相邻 tab 而不是落回文件树
+          const next = kept.slice(0, MAX_FILE_TABS);
+          setActivePath((cur) => (next.some((t) => t.path === cur) ? cur : (next[Math.min(idx, next.length - 1)]?.path ?? null)));
+          return next;
+        });
         if (/\.(html?|htm)$/i.test(f.path)) setCanvasPath(f.path);
       })
       .catch((err: Error) => {
-        if (seq === loadSeq.current) setPreview({ path: openRequest.path, content: `无法预览：${err.message}`, size: 0 });
+        if (seq !== loadSeq.current) return;
+        setFileTabs((prev) => {
+          const next = prev.filter((t) => t.path !== path);
+          next.unshift({ path, content: `无法预览：${err.message}`, size: 0 });
+          return next.slice(0, MAX_FILE_TABS);
+        });
       });
-  }, [openRequest]);
+  }, []);
 
-  // 切 Tab 时清掉文件预览（画布路径保留，方便来回对照）
+  useEffect(() => {
+    if (!openRequest) return;
+    openFile(openRequest.path, openRequest.line);
+  }, [openRequest, openFile]);
+
+  const closeTab = (path: string) => {
+    setFileTabs((prev) => {
+      const idx = prev.findIndex((t) => t.path === path);
+      const next = prev.filter((t) => t.path !== path);
+      if (path === activePath) setActivePath(next[Math.min(idx, next.length - 1)]?.path ?? null);
+      return next;
+    });
+  };
+
+  // 切顶级 Tab 时清编辑态（文件内容与画布路径保留，方便来回对照）
   const select = (t: Tab) => {
     setTab(t);
-    setPreview(null);
     setEditing(false);
   };
 
-  const previewIsHtml = preview ? /\.(html?|htm)$/i.test(preview.path) : false;
+  const activeIsHtml = activeFile ? /\.(html?|htm)$/i.test(activeFile.path) : false;
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface">
@@ -126,26 +193,49 @@ export default function WorkbenchPanel({ openRequest }: { openRequest?: { path: 
       </div>
 
       {/* 内容区 */}
-      {tab === "review" && <ReviewPane />}
+      {tab === "review" && <ReviewPane editedPaths={editedPaths ?? []} />}
       {tab === "files" &&
-        (preview ? (
+        (activeFile ? (
           <div className="flex min-h-0 flex-1 flex-col">
+            {/* 文件 Tab 条（F1）：多文件并行查看，点标签切换，× 关闭 */}
+            <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-1.5">
+              {fileTabs.map((t) => (
+                <button
+                  key={t.path}
+                  type="button"
+                  onClick={() => {
+                    setActivePath(t.path);
+                    setEditing(false);
+                    setAnchorLine(undefined);
+                  }}
+                  title={t.path}
+                  className={cn(
+                    "group flex max-w-44 shrink-0 items-center gap-1 rounded-sm px-2 py-1 text-left font-mono text-[0.6875rem] transition-colors",
+                    t.path === activePath ? "bg-selected text-ink" : "text-ink-3 hover:bg-surface-3 hover:text-ink",
+                  )}
+                >
+                  <span className="truncate">{t.path.split("/").pop()}</span>
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    title="关闭"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(t.path);
+                    }}
+                    className="hidden shrink-0 text-ink-3 hover:text-danger group-hover:block"
+                  >
+                    ✕
+                  </span>
+                </button>
+              ))}
+            </div>
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setPreview(null);
-                  setEditing(false);
-                }}
-                className="text-[0.6875rem] text-ink-3 transition-colors hover:text-ink"
-              >
-                ← 返回
-              </button>
-              <span className="truncate font-mono text-[0.6875rem] text-ink-2" title={preview.path}>
-                {preview.path}
+              <span className="truncate font-mono text-[0.6875rem] text-ink-2" title={activeFile.path}>
+                {activeFile.path}
               </span>
               <span className="ml-auto shrink-0 text-[0.625rem] text-ink-3">
-                {preview.size < 1024 ? `${preview.size}B` : `${Math.round(preview.size / 1024)}KB`}
+                {activeFile.size < 1024 ? `${activeFile.size}B` : `${Math.round(activeFile.size / 1024)}KB`}
               </span>
               {/* 预览/编辑切换（P1-6）：编辑模式 ⌘S 保存回写 */}
               <button
@@ -153,16 +243,19 @@ export default function WorkbenchPanel({ openRequest }: { openRequest?: { path: 
                 onClick={() => setEditing((v) => !v)}
                 className={cn(
                   "shrink-0 rounded-pill px-2 py-0.5 text-[0.625rem] font-medium transition-colors",
-                  editing ? "bg-accent/15 text-accent-strong hover:bg-accent/25" : "bg-surface-2 text-ink-2 hover:text-ink",
+                  editing ? "bg-selected text-ink hover:bg-selected-strong" : "bg-surface-2 text-ink-2 hover:text-ink",
                 )}
               >
                 {editing ? "预览" : "编辑"}
               </button>
-              {previewIsHtml && (
+              {activeIsHtml && (
                 <button
                   type="button"
-                  onClick={() => select("canvas")}
-                  className="shrink-0 rounded-pill bg-accent/15 px-2 py-0.5 text-[0.625rem] font-medium text-accent-strong transition-colors hover:bg-accent/25"
+                  onClick={() => {
+                    setCanvasPath(activeFile.path);
+                    select("canvas");
+                  }}
+                  className="shrink-0 rounded-pill bg-surface-2 px-2 py-0.5 text-[0.625rem] font-medium text-ink-2 transition-colors hover:text-ink"
                 >
                   画布打开
                 </button>
@@ -170,36 +263,39 @@ export default function WorkbenchPanel({ openRequest }: { openRequest?: { path: 
             </div>
             {editing ? (
               <FileEditor
-                key={preview.path}
-                path={preview.path}
-                initialContent={preview.content}
+                key={activeFile.path}
+                path={activeFile.path}
+                initialContent={activeFile.content}
                 onSaved={() => {
                   // 保存后重新拉取，保持预览态与画布候选同步
-                  void client.fsFile(preview.path).then((f) => setPreview({ path: f.path, content: f.content, size: f.size })).catch(() => undefined);
+                  openFile(activeFile.path);
                 }}
               />
             ) : (
-              <pre className="min-h-0 flex-1 overflow-auto p-3 text-xs leading-5 text-ink-2">{preview.content}</pre>
+              <NumberedPreview content={activeFile.content} anchorLine={anchorLine} />
             )}
           </div>
         ) : (
-          <FileTree
-            onOpenFile={(path) => {
-              const seq = ++loadSeq.current;
-              void client
-                .fsFile(path)
-                .then((f) => {
-                  if (seq !== loadSeq.current) return;
-                  setPreview({ path: f.path, content: f.content, size: f.size });
-                  setEditing(false);
-                  // HTML 产物顺手记为画布候选（点「画布打开」即用）
-                  if (/\.(html?|htm)$/i.test(f.path)) setCanvasPath(f.path);
-                })
-                .catch((err: Error) => {
-                  if (seq === loadSeq.current) setPreview({ path, content: `无法预览：${err.message}`, size: 0 });
-                });
-            }}
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* 本轮变更 chips（F3）：Agent 触碰过的文件，点击直开 */}
+            {editedPaths && editedPaths.length > 0 && (
+              <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-3 py-1.5">
+                <span className="text-[0.625rem] text-ink-3">本轮改动 {editedPaths.length}</span>
+                {editedPaths.slice(0, 6).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => openFile(p)}
+                    title={`${p} · 点击打开`}
+                    className="max-w-40 truncate rounded-pill bg-live-tint px-2 py-0.5 font-mono text-[0.625rem] text-live transition-colors hover:bg-live/20"
+                  >
+                    {p.split("/").pop()}
+                  </button>
+                ))}
+              </div>
+            )}
+            <FileTree onOpenFile={(path) => openFile(path)} />
+          </div>
         ))}
       {tab === "map" && <MapPane />}
       {tab === "canvas" && <CanvasPane path={canvasPath} onPathChange={setCanvasPath} />}

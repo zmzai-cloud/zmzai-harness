@@ -286,13 +286,13 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
 
   const modelLabel = selectedModel?.modelId ?? "默认模型";
   const pct = usage && usage.contextWindow > 0 ? Math.min(100, Math.round((usage.used / usage.contextWindow) * 100)) : 0;
-  const pctColor = pct >= 85 ? "bg-danger" : pct >= 60 ? "bg-warning" : "bg-accent-strong";
+  const pctColor = pct >= 85 ? "bg-danger" : pct >= 60 ? "bg-warning" : "bg-success";
 
   return (
     <div ref={rootRef} className="relative shrink-0 px-6 pb-4">
       {/* @ 文件引用浮层 */}
       {atQuery != null && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-64 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-64 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">引用文件 · @路径</div>
           {atItems.map((hit, i) => (
             <button
@@ -302,7 +302,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
               onMouseEnter={() => setAtIndex(i)}
               className={cn(
                 "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-                i === atIndex ? "bg-bg" : "hover:bg-bg",
+                i === atIndex ? "bg-selected" : "hover:bg-surface-3",
               )}
             >
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-ink-3">
@@ -324,7 +324,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
 
       {/* 弹层：模型选择 / Skill 选择（与输入卡片同宽） */}
       {popup === "model" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="flex items-center justify-between px-2 py-1.5">
             <span className="text-[0.6875rem] font-semibold text-ink-3">模型 · 对本条消息生效</span>
             <span className="font-mono text-[0.625rem] text-ink-3">{modelChoices.length} 个可用</span>
@@ -347,7 +347,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             }}
             className={cn(
               "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-              !selectedModel ? "bg-bg" : "hover:bg-bg",
+              !selectedModel ? "bg-selected" : "hover:bg-surface-3",
             )}
           >
             <span className="flex-1 truncate text-xs text-ink-2">跟随代理默认模型</span>
@@ -367,7 +367,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
                 }}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-                  active ? "bg-bg" : "hover:bg-bg",
+                  active ? "bg-selected" : "hover:bg-surface-3",
                   !m.routable && "opacity-50",
                 )}
               >
@@ -421,7 +421,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
                     }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-                      active ? "bg-bg" : "hover:bg-bg",
+                      active ? "bg-selected" : "hover:bg-surface-3",
                     )}
                   >
                     <span className="truncate text-xs font-medium text-ink">{m.name}</span>
@@ -435,7 +435,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         </div>
       )}
       {popup === "effort" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">推理力度 · 对本条消息生效</div>
           {([
             { value: "off" as const, label: "默认", hint: "不发送 reasoning_effort（最兼容）" },
@@ -453,7 +453,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
               }}
               className={cn(
                 "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-                effort === opt.value ? "bg-bg" : "hover:bg-bg",
+                effort === opt.value ? "bg-selected" : "hover:bg-surface-3",
               )}
             >
               <span className="text-xs font-medium text-ink">{opt.label}</span>
@@ -464,7 +464,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         </div>
       )}
       {popup === "skill" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">
             Skill · 注入本次 prompt（.zmzai/skills）
           </div>
@@ -476,7 +476,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
                 setSkill(s);
                 setPopup(null);
               }}
-              className="block w-full rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-bg"
+              className="block w-full rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface-3"
             >
               <span className="text-xs font-medium text-ink">{s.name}</span>
               {s.description && <span className="mt-0.5 block text-[0.6875rem] leading-4 text-ink-3">{s.description}</span>}

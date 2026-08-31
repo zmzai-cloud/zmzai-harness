@@ -28,6 +28,9 @@ import type {
  * 替代旧版 window.harness（IPC），同构后 UI 不再感知宿主差异。
  */
 
+/** SSE 连接状态：connected 正常 / reconnecting 退避重连中 / offline 连续失败待手动。 */
+export type ConnectionState = "connected" | "reconnecting" | "offline";
+
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -62,6 +65,11 @@ export const client = {
 
   listSessions: () => fetch("/api/sessions").then((r) => j<SessionInfo[]>(r)),
 
+  /** 会话全文搜索（消息文本 + 工具摘要），每会话取首个命中。 */
+  searchSessions: (q: string) =>
+    fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`)
+      .then((r) => j<{ query: string; results: { sessionId: string; title: string; snippet: string }[] }>(r)),
+
   createSession: (agent?: string, model?: ModelRef) =>
     post("/api/sessions", { agent, model }).then((r) => j<SessionInfo>(r)),
 
@@ -71,8 +79,10 @@ export const client = {
   deleteSession: (sessionId: string) =>
     send("DELETE", `/api/sessions/${sessionId}`).then((r) => j<{ ok?: boolean; error?: string }>(r)),
 
-  getMessages: (sessionId: string) =>
-    fetch(`/api/sessions/${sessionId}/messages`).then((r) => j<TranscriptMessage[]>(r)),
+  /** 消息转录尾部分页：skip = 已从尾部取走的条数。hasMore=false 表示已到最早。 */
+  getMessagesPage: (sessionId: string, skip: number, limit = 50) =>
+    fetch(`/api/sessions/${sessionId}/messages?tail=${limit}&skip=${skip}`)
+      .then((r) => j<{ messages: TranscriptMessage[]; total: number; hasMore: boolean }>(r)),
 
   prompt: (
     sessionId: string,
@@ -83,8 +93,14 @@ export const client = {
     effort?: ThinkingEffort,
   ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort }).then((r) => j<{ ok: boolean }>(r)),
 
-  replyPermission: (sessionId: string, requestId: string, reply: "once" | "always" | "reject", feedback?: string) =>
-    post(`/api/sessions/${sessionId}/permission`, { requestId, reply, feedback }).then((r) => j<{ ok: boolean }>(r)),
+  replyPermission: (
+    sessionId: string,
+    requestId: string,
+    reply: "once" | "always" | "reject",
+    feedback?: string,
+    audit?: { source: "manual" | "auto" | "fine-grained"; permission?: string; summary?: string },
+  ) =>
+    post(`/api/sessions/${sessionId}/permission`, { requestId, reply, feedback, ...audit }).then((r) => j<{ ok: boolean }>(r)),
 
   abort: (sessionId: string) =>
     post(`/api/sessions/${sessionId}/abort`).then((r) => j<{ ok: boolean }>(r)),
@@ -192,22 +208,68 @@ export const client = {
       .then((r) => j<{ permissions: PermissionSettings }>(r))
       .then((r) => r.permissions),
 
+  /** 权限审计日志（最近决定记录）。 */
+  auditList: (permission?: string) =>
+    fetch(`/api/settings/audit${permission ? `?permission=${encodeURIComponent(permission)}` : ""}`)
+      .then((r) => j<{ rows: { at: string; sessionId: string; permission: string; summary: string; decision: string; source: string }[] }>(r))
+      .then((r) => r.rows),
+
   /** relay 账号联动：key 列表 / 一键签发并绑定（明文只在 relay 响应中转一次）。 */
   relayKeys: () => fetch("/api/settings/keys").then((r) => j<RelayKeyInfo>(r)),
 
   relayKeyIssue: () => post("/api/settings/keys").then((r) => j<KeyStatus & { prefix?: string | null; error?: string }>(r)),
 
-  /** 订阅某会话事件流（SSE）。返回取消函数。 */
-  subscribe: (sessionId: string, cb: (ev: HarnessEvent) => void) => {
-    const es = new EventSource(`/api/sessions/${sessionId}/events`);
-    es.onmessage = (e) => {
-      try {
-        cb(JSON.parse(e.data) as HarnessEvent);
-      } catch {
-        /* 忽略无法解析的帧 */
-      }
+  /** 订阅某会话事件流（SSE）。断线自动重连：放弃 EventSource 的原生无参重连
+   *  （会丢 since 游标），改为手动重建并携带 since=<lastSeq> 断点续传，
+   *  指数退避 1s/2s/4s/8s（上限 15s）；连续失败 3 次置 offline。
+   *  onState 供 UI 展示连接状态（可选，不传则静默重连）。
+   *  返回取消函数。 */
+  subscribe: (
+    sessionId: string,
+    cb: (ev: HarnessEvent) => void,
+    onState?: (state: ConnectionState) => void,
+  ) => {
+    let es: EventSource | null = null;
+    let lastSeq = 0;
+    let attempt = 0;
+    let closed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (closed) return;
+      const url = `/api/sessions/${sessionId}/events${lastSeq > 0 ? `?since=${lastSeq}` : ""}`;
+      es = new EventSource(url);
+      es.onopen = () => {
+        attempt = 0;
+        onState?.("connected");
+      };
+      es.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data) as HarnessEvent & { seq?: number };
+          if (typeof ev.seq === "number" && ev.seq > lastSeq) lastSeq = ev.seq;
+          cb(ev);
+        } catch {
+          /* 忽略无法解析的帧 */
+        }
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (closed) return;
+        attempt += 1;
+        onState?.(attempt >= 3 ? "offline" : "reconnecting");
+        const delay = Math.min(15_000, 1_000 * 2 ** Math.min(attempt - 1, 4));
+        retryTimer = setTimeout(connect, delay);
+      };
     };
-    return () => es.close();
+
+    connect();
+
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
+    };
   },
 };
 

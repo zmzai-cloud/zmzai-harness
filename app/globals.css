@@ -6,70 +6,93 @@
 /* theme 组件源码参与 Tailwind 扫描（消费端三件套之二） */
 @source "../node_modules/@zmzai/theme/src/**/*.{ts,tsx}";
 
-/* zmzai agent harness — 与 muzhi/relay/cloud 等站统一：纸底 + 荧光绿 accent + MiSans。
-   双主题：浅色为主（默认）+ 深色；三态切换（system/light/dark）由 html[data-theme]
-   控制，跟随系统时用 prefers-color-scheme 兼底，data-theme 优先级最高。 */
+/* zmzai agent harness —— 工具界面（IDE 密度）层扩展。
+ * 上游：@zmzai/theme@0.9.3「墨骨 ink frame」，语义不 fork、不更换。
+ *
+ * 双主题单源：全部色值写成 light-dark(浅, 深)，由 color-scheme 在使用点求值，
+ * 一次声明覆盖三态（跟随系统 / 显式浅 / 显式深），不再有两份重复声明。
+ * 数值与对比度实测见 .design/tokens.md（§3 令牌表 / §9 计算脚本）。 */
+
+/* ── 三态开关 ──────────────────────────────────────────────────────────
+ * 用 :root 而非 html：theme.css 自带 :root { color-scheme: light }，
+ * 与 :root 同特异性（0,1,0），靠源码顺序取胜；html 是 (0,0,1)，压不住它。
+ * 显式选择靠 html[data-theme]，特异性 (0,1,1)，优先级最高。 */
+:root {
+  color-scheme: light dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
 
 @theme {
+  /* ═══ harness 自有覆写（保留） ═══ */
   --font-sans: "MiSans", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", system-ui, sans-serif;
   --radius-input: 0px;
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
-}
 
-/* 深色 token 覆盖（theme 包目前只有浅色集；对齐品牌深色底 #0A0A0A / #141414）。
-   theme.css 把基础色定义在 :root，这里在更高特异性选择器上覆写同名变量，
-   theme 组件内引用的 --color-* 全部随之切换，无需改组件源码。
-   两个选择器（显式 dark / 跟随系统）各自声明同一组变量，保持原生 CSS 无预处理器。 */
-html[data-theme="dark"] {
-  --color-bg: #0a0a0a;
-  --color-paper: #0a0a0a;
-  --color-surface: #141414;
-  --color-surface-2: #1c1c1f;
-  --color-surface-strong: #232326;
-  --color-ink: #fafafa;
-  --color-ink-2: #a6a6ad;
-  --color-ink-3: #8a8a92;
-  --color-muted: #a6a6ad;
-  --color-line: #26262b;
-  --color-line-strong: #fafafa;
-  --color-rule: #fafafa;
-  --color-accent: #51d845;
-  --color-accent-strong: #66e95a;
-  --color-accent-ink: #0a0a0a;
-  --color-success: #66e95a;
-  --color-danger: #ff6b5e;
-  --color-warning: #f5c451;
-  color-scheme: dark;
-}
+  /* ═══ 3.1 中性层次（surface 阶梯） ═══
+   * bg → surface → surface-2 是「结构性分层」，由 border-line 承担主要区分；
+   * surface-3 / selected / selected-strong 是「交互反馈层」，
+   * 从 surface-3 起统一 ΔL≈0.028（浅）/ 0.044（深），每档清晰可辨。 */
+  --color-bg: light-dark(oklch(1 0 0), oklch(0.145 0.002 265));
+  --color-surface: light-dark(oklch(0.985 0.001 265), oklch(0.191 0.003 265));
+  --color-surface-2: light-dark(oklch(0.968 0.002 265), oklch(0.228 0.006 265));
+  --color-surface-3: light-dark(oklch(0.94 0.003 265), oklch(0.272 0.008 265));
+  --color-selected: light-dark(oklch(0.912 0.006 265), oklch(0.315 0.01 265));
+  --color-selected-strong: light-dark(oklch(0.884 0.008 265), oklch(0.36 0.012 265));
+  /* --color-surface-strong 是 theme 定义的 surface-2 别名，此处刻意不覆盖，
+     避免「浅色同义、深色异义」的语义漂移（tokens.md §3.7）。 */
 
-/* 跟随系统：未显式选择 light 时跟随 prefers-color-scheme */
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]):not([data-theme="dark"]) {
-    --color-bg: #0a0a0a;
-    --color-paper: #0a0a0a;
-    --color-surface: #141414;
-    --color-surface-2: #1c1c1f;
-    --color-surface-strong: #232326;
-    --color-ink: #fafafa;
-    --color-ink-2: #a6a6ad;
-    --color-ink-3: #8a8a92;
-    --color-muted: #a6a6ad;
-    --color-line: #26262b;
-    --color-line-strong: #fafafa;
-    --color-rule: #fafafa;
-    --color-accent: #51d845;
-    --color-accent-strong: #66e95a;
-    --color-accent-ink: #0a0a0a;
-    --color-success: #66e95a;
-    --color-danger: #ff6b5e;
-    --color-warning: #f5c451;
-    color-scheme: dark;
-  }
-}
+  /* ═══ 3.2 中性文字与线 ═══ */
+  --color-ink: light-dark(oklch(0.21 0.008 265), oklch(0.985 0.001 265));
+  --color-ink-2: light-dark(oklch(0.442 0.017 265), oklch(0.727 0.01 265));
+  /* ink-3 加固（tokens.md §3.5）：theme 原值白底仅 3.69:1 / surface 3.53:1，
+     低于 AA。harness 密集用它承载真实信息（时间戳 / model id / 路径 / hint），
+     覆盖为 4.75:1（白底）/ 4.55:1（surface），与 ink-2 保持 ΔL 0.113 层级差。 */
+  --color-ink-3: light-dark(oklch(0.555 0.016 265), oklch(0.636 0.012 265));
+  --color-line: light-dark(oklch(0.92 0.004 265), oklch(0.271 0.009 265));
+  --color-line-strong: light-dark(oklch(0.87 0.005 265), oklch(0.34 0.01 265));
+  --color-rule: light-dark(oklch(0.21 0.008 265), oklch(0.985 0.001 265));
 
-:root {
-  color-scheme: light;
+  /* ═══ 3.3 结构色 accent（契约镜像） ═══
+   * theme 0.9.3 契约：accent = 中性结构色，只干结构的活、不承担语义。
+   * 浅色墨黑 ⇄ 深色近白，两主题语义严格镜像。
+   * （深色曾误配为 v0.6 已退役的荧光绿 #51d845，同一套 class 两套语义。） */
+  --color-accent: light-dark(oklch(0.21 0.008 265), oklch(0.985 0.001 265));
+  --color-accent-strong: light-dark(oklch(0.09 0.004 265), oklch(1 0 0));
+  --color-accent-ink: light-dark(oklch(1 0 0), oklch(0.145 0.002 265));
+  --color-accent-tint: light-dark(oklch(0.968 0.002 265), oklch(0.272 0.008 265));
+  --color-brand: light-dark(oklch(0.21 0.008 265), oklch(0.985 0.001 265));
+  --color-brand-tint: light-dark(oklch(0.968 0.002 265), oklch(0.272 0.008 265));
+
+  /* ═══ 3.4 语义色 ═══
+   * 浅色值已做 gamut 修正（live / warning / danger-tint 原值超 sRGB 会被裁剪），
+   * 同 L 同 H 下取最大可用彩度，肉眼无差。 */
+  --color-live: light-dark(oklch(0.499 0.1569 145), oklch(0.72 0.2 145));
+  --color-live-tint: light-dark(oklch(0.955 0.045 145), oklch(0.28 0.045 145));
+  --color-success: light-dark(oklch(0.499 0.13 145), oklch(0.7 0.18 145));
+  --color-success-tint: light-dark(oklch(0.955 0.035 145), oklch(0.28 0.035 145));
+  --color-warning: light-dark(oklch(0.499 0.1053 75), oklch(0.84 0.1372 75));
+  --color-warning-tint: light-dark(oklch(0.955 0.045 90), oklch(0.3 0.05 90));
+  --color-danger: light-dark(oklch(0.499 0.18 25), oklch(0.74 0.1571 25));
+  --color-danger-tint: light-dark(oklch(0.955 0.0215 25), oklch(0.3 0.055 25));
+
+  /* ═══ 3.6 Elevation / 阴影 ═══
+   * 深色下 ink 基色阴影失效（与 #0a0a0b 仅 1.12:1），改用纯黑并提高 alpha。
+   * 深色阴影只提供「悬浮感」，分离感由 ring-1 ring-line 承担。 */
+  --shadow-xs: 0 1px 2px
+    light-dark(oklch(0.21 0.008 265 / 0.05), oklch(0 0 0 / 0.4));
+  --shadow-sm: 0 1px 3px light-dark(oklch(0.21 0.008 265 / 0.06), oklch(0 0 0 / 0.5)),
+    0 1px 2px light-dark(oklch(0.21 0.008 265 / 0.04), oklch(0 0 0 / 0.35));
+  --shadow-md: 0 4px 12px -2px light-dark(oklch(0.21 0.008 265 / 0.08), oklch(0 0 0 / 0.55)),
+    0 2px 4px -2px light-dark(oklch(0.21 0.008 265 / 0.05), oklch(0 0 0 / 0.4));
+  --shadow-lg: 0 12px 32px -8px light-dark(oklch(0.21 0.008 265 / 0.12), oklch(0 0 0 / 0.65)),
+    0 4px 8px -4px light-dark(oklch(0.21 0.008 265 / 0.06), oklch(0 0 0 / 0.45));
+  --shadow-xl: 0 24px 56px -12px light-dark(oklch(0.21 0.008 265 / 0.16), oklch(0 0 0 / 0.75));
 }
 
 @layer base {
@@ -93,7 +116,7 @@ html[data-theme="dark"] {
     transition: background-color 160ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* 细边框/滚动条在深色下的统一观感 */
+  /* 滚动条：自动吃到修好的 line-strong（深色下不再是纯白滑块） */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--color-line-strong) transparent;
@@ -118,6 +141,21 @@ html[data-theme="dark"] {
   ::selection {
     background: var(--color-accent);
     color: var(--color-accent-ink);
+  }
+}
+
+/* ===== 流式光标（M5）：Agent 正在工作时的闪烁块，主流消息流感 ===== */
+.streaming-caret {
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  border-radius: 1px;
+  background: var(--color-live);
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
   }
 }
 

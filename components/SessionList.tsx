@@ -122,7 +122,7 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                 }}
                 className={cn(
                   "group relative mb-0.5 block w-full cursor-pointer rounded-sm px-3 py-2 text-left transition-colors",
-                  activeId === s.id ? "bg-bg shadow-sm ring-1 ring-line" : "hover:bg-surface-2",
+                  activeId === s.id ? "bg-selected shadow-sm ring-1 ring-line-strong" : "hover:bg-surface-2",
                 )}
               >
                 {renaming ? (
@@ -158,7 +158,7 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                     title={s.running ? "运行中" : "空闲"}
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      s.running ? "animate-pulse bg-accent-strong" : "bg-line-strong",
+                      s.running ? "animate-pulse bg-live" : "bg-ink-3",
                     )}
                   />
                   <span className="truncate">

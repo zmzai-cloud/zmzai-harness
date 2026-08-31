@@ -10,9 +10,9 @@ import type { GitStatus } from "@/lib/types";
 function statusBadge(x: string, y: string) {
   const code = x !== " " && x === y ? x : x !== " " ? `${x}${y}`.trim() : y;
   const map: Record<string, { label: string; tone: string }> = {
-    M: { label: "修改", tone: "bg-warning/15 text-warning" },
-    A: { label: "新增", tone: "bg-accent/20 text-accent-strong" },
-    D: { label: "删除", tone: "bg-danger/15 text-danger" },
+    M: { label: "修改", tone: "bg-warning-tint text-warning" },
+    A: { label: "新增", tone: "bg-success-tint text-success" },
+    D: { label: "删除", tone: "bg-danger-tint text-danger" },
     R: { label: "重命名", tone: "bg-surface-2 text-ink-2" },
     "??": { label: "未跟踪", tone: "bg-surface-2 text-ink-2" },
   };

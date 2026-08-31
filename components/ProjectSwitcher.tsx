@@ -91,7 +91,7 @@ export default function ProjectSwitcher() {
         className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-surface-2"
         title={active?.path}
       >
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" className="shrink-0 text-accent-strong">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" className="shrink-0 text-ink-3">
           <path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2h6A1.5 1.5 0 0 1 15 6v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 2 12V4z" strokeLinejoin="round" />
         </svg>
         <span className="min-w-0 flex-1">
@@ -112,7 +112,7 @@ export default function ProjectSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute left-3 right-3 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg">
+        <div className="absolute left-3 right-3 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">项目（关联本地文件夹）</div>
           {(state?.projects ?? []).map((p) => (
             <button
@@ -122,7 +122,7 @@ export default function ProjectSwitcher() {
               onClick={() => void switchTo(p.id)}
               className={cn(
                 "block w-full rounded-sm px-2 py-1.5 text-left transition-colors",
-                p.id === active?.id ? "bg-bg" : "hover:bg-bg",
+                p.id === active?.id ? "bg-selected" : "hover:bg-surface-3",
               )}
             >
               <span className="block truncate text-xs font-medium text-ink">{p.name}</span>
@@ -134,7 +134,7 @@ export default function ProjectSwitcher() {
             type="button"
             disabled={busy}
             onClick={() => void pickFolder()}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-ink-2 transition-colors hover:bg-bg hover:text-ink"
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
           >
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M8 3v10M3 8h10" strokeLinecap="round" />

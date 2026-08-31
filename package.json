@@ -18,16 +18,18 @@
     "start": "next start -p 3100",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build:mac": "bash scripts/build-mac.sh"
+    "build:mac": "bash scripts/build-mac.sh",
+    "build:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "@zmzai/agent-framework": "link:../zmzai-framework",
-    "@zmzai/theme": "^0.9.3",
+    "@zmzai/theme": "^0.9.8",
     "next": "15.5.21",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "shiki": "^4.4.3",
     "tailwindcss": "4.3.3",
     "web-tree-sitter": "0.25.8"
   },
@@ -36,6 +38,7 @@
     "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "ali-oss": "^6.23.0",
     "concurrently": "^9.2.1",
     "electron": "^44.0.0",
     "electron-builder": "^26.0.12",
@@ -82,6 +85,19 @@
       "icon": "build/icon.png",
       "category": "public.app-category.developer-tools",
       "darkModeSupport": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "zmzai Harness"
     }
   }
 }

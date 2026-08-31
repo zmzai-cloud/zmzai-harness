@@ -5,7 +5,7 @@
 // dev 模式：等待外部 dev server（pnpm dev 的 next dev）就绪。
 // 壳内不跑业务逻辑；本地引擎能力（MCP/终端/git，见 legacy/）保留为后续增强。
 
-const { app, BrowserWindow, dialog, ipcMain, utilityProcess } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, utilityProcess, Tray, globalShortcut, Notification, nativeImage } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -13,6 +13,70 @@ const WEB_PORT = Number(process.env.HARNESS_WEB_PORT ?? 3100);
 const WEB_URL = (process.env.HARNESS_WEB_URL ?? `http://127.0.0.1:${WEB_PORT}`).replace(/\/$/, "");
 
 let webProcess = null;
+let tray = null;
+let pollTimer = null;
+
+/** 创建菜单栏托盘（macOS）：图标 + 状态文字点（绿●运行中 / 黄◐等待授权），
+ *  点击唤起/聚焦主窗。仅打包时创建（dev 下反复重建托盘体验差，
+ *  HARNESS_TRAY=1 可强制开启调试）。 */
+function createTray() {
+  if (process.platform !== "darwin") return;
+  if (!app.isPackaged && process.env.HARNESS_TRAY !== "1") return;
+  const iconPath = path.join(__dirname, "..", "build", "icon.png");
+  const icon = fs.existsSync(iconPath)
+    ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
+    : nativeImage.createEmpty();
+  tray = new Tray(icon);
+  tray.setToolTip("zmzai harness");
+  tray.on("click", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return createWindow();
+    if (win.isVisible()) win.focus();
+    else win.show();
+  });
+}
+
+/** 托盘状态：轻量轮询 /api/sessions（5s），running→绿点、等待授权→黄点。
+ *  macOS 菜单栏 title 是标准的状态指示方式（iTerm/Typescript playground 同款）。 */
+function startTrayPolling() {
+  if (!tray) return;
+  clearInterval(pollTimer);
+  const update = async () => {
+    try {
+      const res = await fetch(`${WEB_URL}/api/sessions`, { signal: AbortSignal.timeout(3000) });
+      const sessions = res.ok ? await res.json() : [];
+      const waiting = sessions.some((s) => s.status === "waiting_permission");
+      const running = sessions.some((s) => s.running || s.status === "running");
+      tray.setTitle(waiting ? "◐" : running ? "●" : "");
+      tray.setToolTip(waiting ? "zmzai harness — 等待授权" : running ? "zmzai harness — 任务运行中" : "zmzai harness");
+    } catch {
+      tray.setTitle("");
+    }
+  };
+  void update();
+  pollTimer = setInterval(update, 5000);
+}
+
+/** 全局快捷键 ⌘⇧H：唤起/隐藏主窗（桌面端区别于网页的存在感所在）。 */
+function registerGlobalShortcut() {
+  if (process.platform !== "darwin") return;
+  globalShortcut.register("CommandOrControl+Shift+H", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return createWindow();
+    if (win.isVisible() && win.isFocused()) win.hide();
+    else {
+      win.show();
+      win.focus();
+    }
+  });
+}
+
+/** 主进程任务完成通知（Electron 下 Web Notification 未聚焦时不可靠，走主进程）。
+ *  渲染进程通过 harnessNative.notifyTaskDone() 桥接触发。 */
+function notifyTaskDone() {
+  if (!Notification.isSupported()) return;
+  new Notification({ title: "zmzai harness", body: "任务已完成，回来看看结果" }).show();
+}
 
 /** 解析 .env 注入 process.env（已存在的环境变量优先）。standalone server 不保证读 .env，显式注入最稳。 */
 function loadEnvFile() {
@@ -119,10 +183,15 @@ app.whenReady().then(async () => {
     });
     return res.canceled ? null : (res.filePaths[0] ?? null);
   });
+  // 任务完成通知桥（preload 暴露为 window.harnessNative.notifyTaskDone）
+  ipcMain.on("notify:taskDone", () => notifyTaskDone());
 
   ensureWebServer();
   await waitForWeb(WEB_URL);
   createWindow();
+  createTray();
+  startTrayPolling();
+  registerGlobalShortcut();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -131,6 +200,8 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   app.isQuitting = true;
+  clearInterval(pollTimer);
+  globalShortcut.unregisterAll();
   webProcess?.kill();
 });
 

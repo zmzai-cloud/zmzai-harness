@@ -10,22 +10,10 @@ import SessionList from "@/components/SessionList";
 import ChatView from "@/components/ChatView";
 import WorkbenchPanel from "@/components/WorkbenchPanel";
 import AccountBlock from "@/components/AccountBlock";
-import { client } from "@/lib/client";
-import type { SessionInfo, PermissionRequest, PermissionSettings, HarnessEvent, ModelRef, ThinkingEffort, TranscriptMessage, AuthStatus } from "@/lib/types";
+import { client, type ConnectionState } from "@/lib/client";
+import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
+import type { SessionInfo, PermissionRequest, PermissionSettings, HarnessEvent, ModelRef, ThinkingEffort, AuthStatus } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
-
-/** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
- *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
-function transcriptToEvents(messages: TranscriptMessage[]): HarnessEvent[] {
-  const out: HarnessEvent[] = [];
-  for (const m of messages) {
-    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role, ...(m.info.error ? { error: m.info.error } : {}) } } });
-    for (const p of m.parts) {
-      out.push({ type: "message.part.updated", data: { part: p } });
-    }
-  }
-  return out;
-}
 
 function statusLabel(status: string): string {
   switch (status) {
@@ -54,15 +42,21 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   // 侧栏已去代理分组：会话固定用 default agent，模型选择交给底部 Composer（默认推荐）
   const activeAgent = "default";
-  const [events, setEvents] = useState<HarnessEvent[]>([]);
+  // 消息流投影：事件不再累积进 state（无限增长 + 每 delta 全量重投影 O(n²)），
+  // 改为增量折叠进 ChatProjector，rAF 批量取快照渲染（lib/chat-projector.ts）
+  const projectorRef = useRef<ChatProjector | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [chatData, setChatData] = useState<ChatViewData>(EMPTY_CHAT_VIEW);
   // 乐观回显：send 时暂存本条用户消息，切会话后作废
   const [echo, setEcho] = useState<{ text: string; images: { url: string; mediaType: string }[] } | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  // SSE 连接状态（断线自动重连；offline 时 UI 出手动重试）
+  const [connState, setConnState] = useState<ConnectionState>("connected");
   const [selectedModel, setSelectedModel] = useState<ModelRef | null>(null);
-  // P1-10 文件联动：消息路径点击 / ⌘P 快开 → 产物侧文件 Tab（ts 保证重复触发同一文件也生效）
-  const [openFileReq, setOpenFileReq] = useState<{ path: string; ts: number } | null>(null);
+  // P1-10/F2 文件联动：消息路径点击（可带行号）/ ⌘P 快开 → 产物侧文件 Tab（ts 保证重复触发也生效）
+  const [openFileReq, setOpenFileReq] = useState<{ path: string; ts: number; line?: number } | null>(null);
   // P1-7 自治档位：自动 = 授权请求自动「始终允许」
   const [autoMode, setAutoMode] = useState(false);
   // 设置 → 通用 → 权限：细粒度自动执行配置（terminal/edit/task/gitWrite）。
@@ -70,13 +64,25 @@ export default function App() {
   const [permAuto, setPermAuto] = useState<PermissionSettings>({});
   const permAutoRef = useRef<PermissionSettings>({});
   // P2-12 命令面板
-  const [palette, setPalette] = useState<"commands" | "files" | null>(null);
+  const [palette, setPalette] = useState<"commands" | "files" | "search" | null>(null);
   const paletteActionsRef = useRef<{ newSession: () => void }>({ newSession: () => undefined });
   // 左侧栏收起/展开（Qoder 同款，持久化）
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     void client.authStatus().then(setAuth);
+  }, []);
+
+  // 投影快照的 rAF 批处理：同一帧内任意多条事件只触发一次渲染
+  const flushProjection = useCallback(() => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setChatData(projectorRef.current?.data() ?? EMPTY_CHAT_VIEW);
+    });
+  }, []);
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
   }, []);
 
   // 自治档位持久化（localStorage，纯前端语义）+ 权限自动执行配置（settings.json）
@@ -95,16 +101,16 @@ export default function App() {
     });
   }, []);
 
-  // P2-12 全局快捷键：⌘K 命令 / ⌘P 文件（输入类元素聚焦时不抢）
+  // P2-12 全局快捷键：⌘K 命令 / ⌘P 文件 / ⌘⇧F 全文搜索（输入类元素聚焦时不抢）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
-      if (key !== "k" && key !== "p") return;
+      if (key !== "k" && key !== "p" && !(key === "f" && e.shiftKey)) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       e.preventDefault();
-      setPalette(key === "k" ? "commands" : "files");
+      setPalette(key === "k" ? "commands" : key === "p" ? "files" : "search");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -115,58 +121,107 @@ export default function App() {
   }, [auth?.loggedIn]);
 
   useEffect(() => {
+    const projector = projectorRef.current ?? (projectorRef.current = new ChatProjector());
     if (!activeId) {
-      setEvents([]);
+      projector.reset();
+      setChatData(EMPTY_CHAT_VIEW);
       setStatus("idle");
       setPending(null);
       setEcho(null);
+      setConnState("connected");
       return;
     }
     let cancelled = false;
-    // 历史恢复与实时流的竞态防护：订阅先建立（不丢事件），转录异步载入期间
-    // 实时事件先进 buffer；转录渲染完成后再合并——顺序仍是 历史→实时。
+    // 历史恢复与实时流的竞态防护（语义与旧 events 数组版一致）：
+    // 订阅先建立（不丢事件），转录异步载入期间实时事件进 buffer；
+    // 转录 ingest 完成后再合并 buffer——投影顺序仍是 历史→实时。
     let historyLoaded = false;
     const liveBuffer: HarnessEvent[] = [];
-    setEvents([]);
+    projector.reset();
+    setChatData(EMPTY_CHAT_VIEW);
     setStatus("idle");
     setPending(null);
     setEcho(null);
+    setConnState("connected");
     const unsub = client.subscribe(activeId, (ev) => {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
         const req = (ev.data as { request: PermissionRequest }).request;
         // P1-7 自动档：全部「始终允许」；细粒度权限（设置 → 通用）：命中的域自动「始终允许」
         const domain = PERMISSION_DOMAIN_OF[req.permission];
-        if (autoMode || (domain && permAutoRef.current[domain] === "auto")) {
-          void client.replyPermission(activeId, req.id, "always").catch(() => undefined);
+        const autoHit = autoMode || (domain && permAutoRef.current[domain] === "auto");
+        if (autoHit) {
+          void client
+            .replyPermission(activeId, req.id, "always", undefined, {
+              source: autoMode ? "auto" : "fine-grained",
+              permission: req.permission,
+              summary: req.metadata?.summary ?? req.metadata?.command ?? req.metadata?.filePath ?? "",
+            })
+            .catch(() => undefined);
         } else {
           setPending(req);
         }
       } else if (ev.type === "permission.replied") setPending(null);
       if (!historyLoaded) liveBuffer.push(ev);
-      else setEvents((prev) => [...prev, ev]);
-    });
-    // 跨会话恢复：载入该会话已持久化的历史转录，渲染成消息树
-    client.getMessages(activeId).then((msgs) => {
+      else {
+        projector.ingest(ev);
+        flushProjection();
+      }
+    }, setConnState);
+    // 跨会话恢复：尾部分页拉取转录（首屏 50 条），逐条折叠进投影器
+    client.getMessagesPage(activeId, 0).then((page) => {
       if (cancelled) return;
-      setEvents(transcriptToEvents(msgs));
+      loadedCountRef.current = page.messages.length;
+      for (const ev of transcriptToEvents(page.messages)) projector.ingest(ev);
       historyLoaded = true;
-      if (liveBuffer.length) setEvents((prev) => [...prev, ...liveBuffer]);
+      for (const ev of liveBuffer) projector.ingest(ev);
+      setHasMore(page.hasMore);
+      flushProjection();
     });
     return () => {
       cancelled = true;
       unsub();
     };
-  }, [activeId, autoMode]);
+  }, [activeId, autoMode, flushProjection]);
 
-  // P2-14 任务完成通知：running → idle 且窗口不在前台时系统通知 + 标题标记
+  // 触顶加载更早历史：prepend 进投影器（不破坏已折叠的实时事件），视口锚定在 ChatView。
+  // 投影按消息 id 幂等 upsert，SSE 重连的重放事件天然去重，无需额外标记。
+  const [hasMore, setHasMore] = useState(false);
+  const loadedCountRef = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const loadOlder = useCallback(async () => {
+    const sid = activeId;
+    if (!sid || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    try {
+      const page = await client.getMessagesPage(sid, loadedCountRef.current);
+      if (!page.messages.length) {
+        setHasMore(false);
+        return;
+      }
+      loadedCountRef.current += page.messages.length;
+      projectorRef.current?.ingestBatch(transcriptToEvents(page.messages), true);
+      setHasMore(page.hasMore);
+      flushProjection();
+    } catch {
+      /* 拉取失败静默，下次触顶重试 */
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [activeId, flushProjection]);
+
+  // P2-14 任务完成通知：running → idle 且窗口不在前台时系统通知 + 标题标记。
+  // Electron 下优先走主进程 Notification（未聚焦更可靠），Web 走 Web Notification。
   const prevStatusRef = useRef(status);
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (prev === "running" && status === "idle") {
       document.title = "✓ 任务完成 — ZMZAI harness";
-      if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+      const bridge = window.harnessNative;
+      if (document.hidden && bridge?.notifyTaskDone) {
+        bridge.notifyTaskDone();
+      } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {
         new Notification("ZMZAI harness", { body: "任务已完成，回来看看结果" });
       }
     } else if (status === "running") {
@@ -174,12 +229,23 @@ export default function App() {
     }
   }, [status]);
 
-  // P2-15 多会话并行状态：10s 轮询刷新运行态点
+  // P2-15 多会话并行状态：轮询刷新运行态点（兜底——运行态主链路是 SSE
+  // session.status）。前台 10s，页面隐藏降到 60s 省电省请求。
   useEffect(() => {
-    const timer = setInterval(() => {
-      void client.listSessions().then(setSessions).catch(() => undefined);
-    }, 10_000);
-    return () => clearInterval(timer);
+    let timer: ReturnType<typeof setInterval>;
+    const start = () => {
+      clearInterval(timer);
+      timer = setInterval(() => {
+        void client.listSessions().then(setSessions).catch(() => undefined);
+      }, document.hidden ? 60_000 : 10_000);
+    };
+    const onVis = () => start();
+    document.addEventListener("visibilitychange", onVis);
+    start();
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      clearInterval(timer);
+    };
   }, []);
 
   const newSession = useCallback(async () => {
@@ -233,7 +299,11 @@ export default function App() {
   const reply = useCallback(
     async (r: "once" | "always" | "reject", feedback?: string) => {
       if (!activeId || !pending) return;
-      await client.replyPermission(activeId, pending.id, r, feedback);
+      await client.replyPermission(activeId, pending.id, r, feedback, {
+        source: "manual",
+        permission: pending.permission,
+        summary: pending.metadata?.summary ?? pending.metadata?.command ?? pending.metadata?.filePath ?? "",
+      });
       setPending(null);
     },
     [activeId, pending],
@@ -258,6 +328,7 @@ export default function App() {
   const commands: Command[] = [
     { id: "new-session", label: "新建会话", hint: "⌘N 不支持时用这里", run: () => paletteActionsRef.current.newSession() },
     { id: "open-files", label: "搜索文件…", hint: "⌘P", run: () => setPalette("files") },
+    { id: "search-sessions", label: "搜索会话内容…", hint: "⌘⇧F", run: () => setPalette("search") },
     { id: "toggle-auto", label: autoMode ? "切到确认档（逐次授权）" : "切到自动档（自动授权）", hint: "档位", run: toggleAuto },
     { id: "open-settings", label: "打开设置", hint: "个人 key / relay / MCP / 插件", run: () => router.push("/settings") },
   ];
@@ -269,7 +340,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-bg text-ink">
-      {/* 品牌顶栏：全域统一 Navbar + 主题/设置/登录/新建会话 */}
+      {/* 品牌顶栏：全域统一 Navbar + 侧栏开关（主题 / 设置入口在左下角账户块菜单） */}
       <Navbar
         sublabel="harness"
         className="h-12"
@@ -289,17 +360,6 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
                 <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
                 <path d="M6 2.5v11" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push("/settings")}
-              title="设置（个人 key / relay / MCP / 插件）"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-                <circle cx="8" cy="8" r="2.2" />
-                <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" strokeLinecap="round" />
               </svg>
             </button>
           </>
@@ -326,38 +386,42 @@ export default function App() {
         />
         )}
         <ChatView
-          events={events}
+          data={chatData}
+          hasMore={hasMore}
+          onLoadMore={() => void loadOlder()}
           status={status}
           pending={pending}
           sessionId={activeId}
+          connState={connState}
           selectedModel={selectedModel}
           onSelectModel={setSelectedModel}
           onSend={send}
           onReply={reply}
           onAbort={abort}
-          onOpenFile={(path) => setOpenFileReq({ path, ts: Date.now() })}
+          onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
           autoMode={autoMode}
           onToggleAuto={toggleAuto}
           echo={echo}
         />
         <div className="hidden w-96 shrink-0 min-[1180px]:block">
-          <WorkbenchPanel openRequest={openFileReq} />
+          <WorkbenchPanel openRequest={openFileReq} editedPaths={chatData.editedPaths} />
         </div>
       </div>
 
-      {/* P2-12 命令面板（⌘K 命令 / ⌘P 文件快开） */}
+      {/* P2-12 命令面板（⌘K 命令 / ⌘P 文件快开 / ⌘⇧F 全文搜索） */}
       {palette && (
         <CommandPalette
           mode={palette}
           commands={commands}
-          onOpenFile={(path) => setOpenFileReq({ path, ts: Date.now() })}
+          onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
+          onSelectSession={(id) => setActiveId(id)}
           onClose={() => setPalette(null)}
         />
       )}
 
       {/* 底部状态栏：低调一行 */}
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[0.6875rem] text-ink-3">
-        <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "animate-pulse bg-accent-strong" : "bg-ink-3"}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "animate-pulse bg-live" : "bg-ink-3"}`} />
         <span>{statusLabel(status)}</span>
         <span className="text-line-strong">·</span>
         <span className="font-mono">
