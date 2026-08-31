@@ -217,15 +217,15 @@ export default function App() {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (prev === "running" && status === "idle") {
-      document.title = "✓ 任务完成 — ZMZAI harness";
+      document.title = "✓ 任务完成 — Lectern";
       const bridge = window.harnessNative;
       if (document.hidden && bridge?.notifyTaskDone) {
         bridge.notifyTaskDone();
       } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-        new Notification("ZMZAI harness", { body: "任务已完成，回来看看结果" });
+        new Notification("Lectern", { body: "任务已完成，回来看看结果" });
       }
     } else if (status === "running") {
-      document.title = "ZMZAI harness";
+      document.title = "Lectern";
     }
   }, [status]);
 
@@ -342,7 +342,7 @@ export default function App() {
     <div className="flex h-full flex-col bg-bg text-ink">
       {/* 品牌顶栏：全域统一 Navbar + 侧栏开关（主题 / 设置入口在左下角账户块菜单） */}
       <Navbar
-        sublabel="harness"
+        sublabel="lectern"
         className="h-12"
         actions={
           <>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zmzai Harness — macOS 打包脚本（Apple Silicon / arm64）
+# Lectern — macOS 打包脚本（Apple Silicon / arm64）
 # 用法：bash scripts/build-mac.sh   （产物在 dist/）
 # 前置：pnpm install（含 electron-builder）、.env 已就位（正式环境或本地）
 set -euo pipefail
@@ -44,4 +44,4 @@ pnpm exec electron-builder --mac --arm64 --publish never
 
 echo "==> [5/5] 产物"
 ls -lh dist/*.dmg dist/*.zip
-echo "完成。安装：双击 dist/*.dmg 拖入 Applications；或直接运行 dist/mac-arm64/zmzai Harness.app"
+echo "完成。安装：双击 dist/*.dmg 拖入 Applications；或直接运行 dist/mac-arm64/Lectern.app"

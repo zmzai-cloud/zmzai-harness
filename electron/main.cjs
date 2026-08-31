@@ -1,4 +1,4 @@
-// zmzai agent harness — Electron 壳
+// Lectern — Electron 壳（原 zmzai agent harness）
 // Web / App 同构：App 与浏览器加载同一个 Next.js 页面（默认 127.0.0.1:3100）。
 // 生产模式（打包后）：壳内自动拉起内嵌的 Next standalone 服务（node .next/standalone/server.js），
 // 数据/工作区落到系统用户数据目录（asar 内只读，不能写相对路径）。
@@ -27,7 +27,7 @@ function createTray() {
     ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
     : nativeImage.createEmpty();
   tray = new Tray(icon);
-  tray.setToolTip("zmzai harness");
+  tray.setToolTip("Lectern");
   tray.on("click", () => {
     const win = BrowserWindow.getAllWindows()[0];
     if (!win) return createWindow();
@@ -185,6 +185,17 @@ app.whenReady().then(async () => {
   });
   // 任务完成通知桥（preload 暴露为 window.harnessNative.notifyTaskDone）
   ipcMain.on("notify:taskDone", () => notifyTaskDone());
+
+  // 品牌改名迁移（一次性）：productName 从 "zmzai Harness" 改为 "Lectern" 后，
+  // userData 目录随之变化；若旧目录存在且新目录还没有会话库，整体搬过来。
+  {
+    const userData = app.getPath("userData");
+    const legacy = path.join(path.dirname(userData), "zmzai Harness");
+    if (path.resolve(legacy) !== path.resolve(userData) && fs.existsSync(legacy)
+        && !fs.existsSync(path.join(userData, "zmzai.db"))) {
+      try { fs.cpSync(legacy, userData, { recursive: true }); } catch {}
+    }
+  }
 
   ensureWebServer();
   await waitForWeb(WEB_URL);

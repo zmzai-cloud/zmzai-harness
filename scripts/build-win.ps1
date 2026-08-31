@@ -1,4 +1,4 @@
-# zmzai Harness — Windows 打包脚本（x64）
+# Lectern — Windows 打包脚本（x64）
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\build-win.ps1 [-Upload] [-Dry]
 #   -Upload   构建后上传 dist 产物到 OSS（需 .env.release，见 scripts\.env.release.example）
 #   -Dry      上传开关生效时只列清单不实际上传
@@ -78,7 +78,7 @@ if ($LASTEXITCODE -ne 0) { throw "electron-builder 失败" }
 
 Step "[6/6] 产物"
 Get-ChildItem dist\*.exe, dist\*.zip -ErrorAction SilentlyContinue | Format-Table Name, @{L="Size"; E={"{0:N1} MB" -f ($_.Length / 1MB)}}
-Write-Host "完成。安装：双击 dist\*Setup*.exe（NSIS 安装器，可选安装目录）；或解压 zip 直接运行 zmzai Harness.exe"
+Write-Host "完成。安装：双击 dist\*Setup*.exe（NSIS 安装器，可选安装目录）；或解压 zip 直接运行 Lectern.exe"
 Write-Host "注意：Windows 首次运行 SmartScreen 可能提示未签名应用 → 「更多信息」→「仍要运行」。"
 
 if ($Upload) {

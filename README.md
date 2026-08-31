@@ -1,4 +1,4 @@
-# zmzai-harness
+# Lectern（原 zmzai-harness）
 
 > **Web / App 同构的 Agent 工作台**：浏览器（Web）与 Electron（App）加载同一套 Next.js 页面，推理走 relay 云端，执行在本机沙箱。
 
@@ -54,7 +54,7 @@ corepack pnpm build:mac      # 打包 macOS dmg + zip（arm64，产物在 dist/�
 
 ### macOS / Windows 打包
 
-- **macOS**（scripts/build-mac.sh）：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/zmzai Harness-0.2.0-arm64.dmg` + zip（arm64）。
+- **macOS**（scripts/build-mac.sh）：next build（standalone）→ 组装静态资源 → npm 实体化生产 node_modules（pnpm symlink / file: 依赖不可直接打包）→ electron-builder（无签名证书，本机可直接运行）。产物：`dist/Lectern-0.2.0-arm64.dmg`（历史产物仍为 zmzai Harness-*） + zip（arm64）。
 - **Windows**（`pnpm build:win`，在 Windows 机器上跑）：同构流程（scripts/build-win.ps1），产物：NSIS 安装器 exe（可选安装目录 + 桌面快捷方式）+ zip（x64）。未签名，SmartScreen 首次运行提示「仍要运行」属预期。
 
 ## 相关仓库

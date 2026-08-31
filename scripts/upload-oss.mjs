@@ -121,8 +121,8 @@ if (failed) {
 // ── 直链清单 ──
 writeFileSync(
   join(distDir, "release-links.md"),
-  `# zmzai Harness v${version} 下载直链\n\n${links.join("\n")}\n`,
+  `# Lectern v${version} 下载直链\n\n${links.join("\n")}\n`,
 );
 console.log(`\n✅ 全部上传完成。直链清单已写入 dist/release-links.md：\n`);
 console.log(links.join("\n"));
-console.log(`\n下一步：把上述链接更新进 landing page 的下载区（zmzai-harness-landing.html），并发布 GitHub Release 归档。`);
+console.log(`\n下一步：把上述链接更新进 landing page 的下载区（zmzai-lectern-landing.html），并发布 GitHub Release 归档。`);

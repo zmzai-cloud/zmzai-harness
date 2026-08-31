@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zmzai Harness — macOS 一键发布：构建 → 上传 OSS → 直链清单
+# Lectern — macOS 一键发布：构建 → 上传 OSS → 直链清单
 # 用法：bash scripts/release.sh [--skip-build] [--dry]
 #   --skip-build   跳过构建，直接上传 dist/ 现有产物（补传/重跑用）
 #   --dry          只列出上传清单，不实际上传
