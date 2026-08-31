@@ -69,7 +69,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
   return (
     <div ref={ref} className="relative">
       {menu && (
-        <div className="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-md border border-line bg-surface p-1 shadow-lg">
+        <div className="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-md border border-line bg-surface p-1 shadow-lg ring-1 ring-line">
           <div className="px-2.5 pb-2 pt-2">
             <div className="truncate text-xs font-medium text-ink">{auth?.user?.name ?? "未登录"}</div>
             <div className="truncate text-[0.625rem] text-ink-3">{auth?.user?.email ?? "登录 relay 后可同步账号能力"}</div>
@@ -83,7 +83,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
                 onClick={() => pickTheme(pref)}
                 className={
                   "flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] transition-colors " +
-                  (themePref === pref ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface")
+                  (themePref === pref ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-3")
                 }
               >
                 {pref === "system" ? "跟随系统" : pref === "light" ? "浅色" : "深色"}
@@ -91,12 +91,19 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
             ))}
           </div>
           <div className="border-t border-line pt-1">
+            <Link
+              href="/settings"
+              onClick={() => setMenu(false)}
+              className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
+            >
+              设置
+            </Link>
             {auth?.loggedIn ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={logout}
-                className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-danger transition-colors hover:bg-surface"
+                className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-danger transition-colors hover:bg-surface-3"
               >
                 退出登录
               </button>
@@ -104,7 +111,7 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
               <Link
                 href="/login"
                 onClick={() => setMenu(false)}
-                className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-ink-2 transition-colors hover:bg-surface hover:text-ink"
+                className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
               >
                 登录 relay
               </Link>

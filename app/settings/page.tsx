@@ -80,6 +80,69 @@ function PermCard({ perm, onChange }: { perm: PermissionSettings; onChange: (dom
 
 const fmtMicros = (v: number) => (v >= 1_000_000 ? `¥${(v / 1_000_000).toFixed(2)}` : `¥${(v / 1_000_000).toFixed(4)}`);
 
+/** 权限审计日志：最近 200 条授权决定（手动 / 自动档 / 细粒度自动三分）。 */
+const SOURCE_LABEL: Record<string, { label: string; cls: string }> = {
+  manual: { label: "手动", cls: "bg-surface-2 text-ink-2" },
+  auto: { label: "自动档", cls: "bg-live-tint text-live" },
+  "fine-grained": { label: "细粒度自动", cls: "bg-warning-tint text-warning" },
+};
+
+function AuditCard() {
+  const [rows, setRows] = useState<{ at: string; sessionId: string; permission: string; summary: string; decision: string; source: string }[]>([]);
+  const [filter, setFilter] = useState<string>("");
+
+  useEffect(() => {
+    void client.auditList(filter || undefined).then(setRows).catch(() => setRows([]));
+  }, [filter]);
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <h2 className="mb-1 text-base font-semibold text-ink">权限日志</h2>
+          <p className="mb-3 text-xs leading-5 text-ink-3">最近 200 条授权决定。自动档给 Agent 松绑后，这里是事后追溯的安全带。</p>
+        </div>
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className={selectClass}>
+          <option value="">全部工具域</option>
+          {PERM_ROWS.map((r) => (
+            <option key={r.domain} value={r.domain}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="overflow-hidden rounded-md border border-line bg-surface">
+        {rows.length === 0 ? (
+          <div className="px-4 py-6 text-center text-xs leading-5 text-ink-3">暂无记录。批准或拒绝授权后会出现在这里。</div>
+        ) : (
+          rows.map((row, i) => {
+            const src = SOURCE_LABEL[row.source] ?? { label: row.source, cls: "bg-surface-2 text-ink-2" };
+            return (
+              <div key={`${row.at}-${i}`} className={"flex items-center gap-2.5 px-4 py-2 " + (i > 0 ? "border-t border-line" : "")}>
+                <span className="w-8 shrink-0 text-center">
+                  <span className={"inline-block rounded-sm px-1 py-0.5 text-[0.625rem] font-medium " + (row.decision === "reject" ? "bg-danger-tint text-danger" : "bg-success-tint text-success")}>
+                    {row.decision === "reject" ? "拒绝" : "允许"}
+                  </span>
+                </span>
+                <span className="w-20 shrink-0 truncate text-xs text-ink-2" title={row.permission}>
+                  {PERM_ROWS.find((r) => r.domain === row.permission)?.title ?? row.permission}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-3" title={row.summary}>
+                  {row.summary || "—"}
+                </span>
+                <span className={"shrink-0 rounded-sm px-1.5 py-0.5 text-[0.625rem] font-medium " + src.cls}>{src.label}</span>
+                <span className="shrink-0 font-mono text-[0.625rem] text-ink-3">
+                  {new Date(row.at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const [section, setSection] = useState<SectionId>("general");
   // 左侧导航收起/展开（与工作台同一持久化键约定）
@@ -292,7 +355,7 @@ export default function SettingsPage() {
                 onClick={() => setSection(item.id)}
                 className={
                   "flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.8125rem] transition-colors " +
-                  (section === item.id ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface")
+                  (section === item.id ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-3")
                 }
               >
                 {item.label}
@@ -340,6 +403,7 @@ export default function SettingsPage() {
                 </Card>
                 <PermCard perm={perm} onChange={setPermDomain} />
                 {permSaved && <div className="-mt-5 mb-6 text-[0.6875rem] text-success">权限配置已保存，立即生效。</div>}
+                <AuditCard />
                 <Card title="关于" desc="harness 本地工作台：Agent 对话、文件/Git 审查、MCP、插件均在本页所在服务完成。">
                   <div className="text-[0.6875rem] leading-5 text-ink-3">
                     <div>数据目录：data/（settings.json 0600、zmzai.db WAL、.secret 密钥文件）</div>
