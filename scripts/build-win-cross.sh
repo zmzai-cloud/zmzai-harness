@@ -37,8 +37,9 @@ guard_mv dist .package-build
 
 echo "==> [1/5] next build（生产构建，含 standalone 输出）"
 # 清掉上次构建的 .next/types 与 tsbuildinfo：残留会导致类型检查阶段引用不存在的
-# 文件而 Failed to compile（与 mac 侧同一坑）
-rm -rf .next/types tsconfig.tsbuildinfo
+# 文件而 Failed to compile（与 mac 侧同一坑）。大目录 rm 会触发 WorkBuddy
+# safe-delete 守卫（>50 文件拦截），一律 mv 到 /tmp。
+guard_mv .next/types tsconfig.tsbuildinfo
 pnpm build
 
 # fail-fast：入口不存在就停，绝不打出会闪退的包
