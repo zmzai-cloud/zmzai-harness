@@ -12,17 +12,22 @@ export const runtime = "nodejs";
 /** 会话 id 白名单字符（jsonl 文件名即 id，防路径逃逸）。 */
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
-/** PATCH /api/sessions/[id] — 重命名会话（store.updateSession 落 jsonl）。 */
+/** PATCH /api/sessions/[id] — 重命名 / 置顶 / 归档（store.updateSession 落库）。
+ *  title / pinned / archived 三者可独立或组合更新。 */
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!SAFE_ID.test(id)) return NextResponse.json({ error: "非法会话 id" }, { status: 400 });
-  const body = (await request.json().catch(() => null)) as { title?: string } | null;
+  const body = (await request.json().catch(() => null)) as { title?: string; pinned?: boolean; archived?: boolean } | null;
   const title = body?.title?.trim();
-  if (!title) return NextResponse.json({ error: "标题不能为空" }, { status: 400 });
+  const patch: { title?: string; pinned?: boolean; archived?: boolean } = {};
+  if (title) patch.title = title.slice(0, 80);
+  if (typeof body?.pinned === "boolean") patch.pinned = body.pinned;
+  if (typeof body?.archived === "boolean") patch.archived = body.archived;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ error: "没有可更新的字段" }, { status: 400 });
 
   const found = await sessionStoreFor(id);
   if (!found) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
-  await found.store.updateSession(id, { title: title.slice(0, 80) });
+  await found.store.updateSession(id, patch);
   return NextResponse.json({ ok: true });
 }
 

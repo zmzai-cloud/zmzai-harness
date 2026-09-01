@@ -3,7 +3,7 @@ import { Markdown, PermissionCard, Reasoning, ToolCard, ToolGroup, cn } from "@z
 
 import type { ConnectionState } from "@/lib/client";
 import type { ChatViewData, TodoItem } from "@/lib/chat-projector";
-import type { ModelRef, Part, PermissionRequest, SessionIsolation } from "@/lib/types";
+import type { ModelRef, Part, PermissionRequest, SessionIsolation, SessionSummary } from "@/lib/types";
 import Composer from "./Composer";
 import DiffView, { diffStat } from "./DiffView";
 
@@ -22,6 +22,32 @@ function statusLabel(status: string): string {
     default:
       return "空闲";
   }
+}
+
+/** N5 失败自动诊断：把已知错误名/错误消息关键词映射成「可能原因 + 建议动作」，
+ *  让错误卡不再只报干巴巴的 name+message，而是一眼能懂「为什么断、该怎么办」。 */
+function diagnoseError(name: string, message: string): { cause: string; hint: string } | null {
+  const n = (name || "").toLowerCase();
+  const m = (message || "").toLowerCase();
+  if (n.includes("streamidletimeout") || (m.includes("无响应") && m.includes("中止"))) {
+    return { cause: "上游长时间无响应，模型可能卡住或不支持该输入（如非视觉模型收到图片）", hint: "点「继续」续跑；若反复超时，换个模型或简化输入" };
+  }
+  if (n.includes("leaseexpired") || m.includes("服务重启")) {
+    return { cause: "服务在运行期间重启，会话上下文已保留但本次运行被打断", hint: "点「继续」即可在同一会话接续，无需重做" };
+  }
+  if (/\b429\b/.test(m) || m.includes("rate limit") || m.includes("too many requests")) {
+    return { cause: "触发上游限流（429），请求太频繁", hint: "稍等片刻再点「继续」，系统会退避重试" };
+  }
+  if (/\b50[234]\b/.test(m) || m.includes("bad gateway") || m.includes("service unavailable") || m.includes("internal server error")) {
+    return { cause: "上游服务暂时不可用（5xx 网关/服务端错误）", hint: "稍后重试；若持续出现，检查模型服务状态" };
+  }
+  if (m.includes("timeout") || m.includes("etimedout") || m.includes("socket hang up") || m.includes("econnreset") || m.includes("terminated")) {
+    return { cause: "网络连接中断或请求超时", hint: "检查网络后点「继续」重试；弱网下可缩短任务" };
+  }
+  if (n.includes("aborted") || m.includes("已取消") || m.includes("cancelled")) {
+    return { cause: "任务被手动中止", hint: "可直接点「继续」接着上次断点跑" };
+  }
+  return null;
 }
 
 /** 内联 diff 卡片：edit/write 工具调用落盘后的变更预览（写入已即时生效）。
@@ -192,6 +218,11 @@ type Props = {
   onSelectModel: (m: ModelRef | null) => void;
   onSend: (t: string) => void;
   onReply: (r: "once" | "always" | "reject", feedback?: string) => void;
+  /** 续跑：中断后带断点上下文（已完成步骤/改过文件/最后一步/错误摘要）继续，
+   *  而非裸发「继续」二字——让模型真正接上断点。 */
+  onContinue: (ctx: string) => void;
+  /** N6 卡住检测：运行中超过阈值无新事件（可能卡在长工具调用/上游无响应）。 */
+  stalled?: boolean;
   onAbort: () => void;
   /** 点击消息内的文件路径（可带行号）→ 产物侧文件 Tab 打开并滚动定位（P1-10/F2 联动）。 */
   onOpenFile: (path: string, line?: number) => void;
@@ -253,8 +284,113 @@ function TodoCard({ todos }: { todos: TodoItem[] }) {
   );
 }
 
-export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice }: Props) {
-  const { messages, todos, reads } = data;
+/** 运行中实时进度条（N6）：任务跑着时，用户眼前不再只有一个点在闪，
+ *  而是「正在执行第 N 步 · 当前工具」的明确进展。数据全在投影快照里——
+ *  todos 的 in_progress 项 + 消息里最后一个 running 工具，纯前端拼装。 */
+function LiveProgressBar({ todos, currentTool }: { todos: TodoItem[]; currentTool: string | null }) {
+  const done = todos.filter((t) => t.status === "completed").length;
+  const total = todos.length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const current = todos.find((t) => t.status === "in_progress")?.content;
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-live/30 bg-live/5 px-3 py-2">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-live" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 text-[0.6875rem] leading-5">
+          <span className="shrink-0 font-medium text-ink">
+            {total > 0 ? `正在执行第 ${Math.min(done + 1, total)}/${total} 步` : "正在执行"}
+          </span>
+          {currentTool && (
+            <span className="truncate font-mono text-[0.625rem] text-ink-2" title={currentTool}>
+              {currentTool}
+            </span>
+          )}
+          {current && <span className="truncate text-ink-3" title={current}>· {current}</span>}
+        </div>
+        {total > 0 && (
+          <div className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-2">
+            <span className="block h-full rounded-pill bg-live transition-all duration-500" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+      {total > 0 && <span className="shrink-0 font-mono text-[0.625rem] text-ink-3">{pct}%</span>}
+    </div>
+  );
+}
+
+/** 任务终态小结卡（N5）：run 收尾的 AI 一句总结 + 结构化统计。
+ *  让「一个 call tool 结束」有了明确收尾——完成/中断/失败三种终态都有落点。
+ *  N6：总结里的「下一步建议」从文字升级为可执行——点击按钮直接续跑；
+ *      并附「执行轨迹」可展开时间线（这轮跑了哪些工具、各花多久）。 */
+type TimelineItem = { tool: string; title?: string; status: string; durationMs: number | null };
+
+function SummaryCard({ summary, onFollowUp, timeline }: { summary: SessionSummary; onFollowUp?: () => void; timeline?: TimelineItem[] }) {
+  const kind = summary.kind;
+  const label = kind === "completed" ? "任务完成" : kind === "aborted" ? "任务中断" : "任务失败";
+  const dot = kind === "completed" ? "bg-success" : kind === "aborted" ? "bg-warning" : "bg-danger";
+  const meta = summary.meta;
+  const parts: string[] = [];
+  if (meta) {
+    if (meta.filesEdited > 0) parts.push(`改动 ${meta.filesEdited} 个文件`);
+    parts.push(`${meta.toolCalls} 次工具调用`);
+    if (meta.durationMs > 0) parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+  }
+  const [showTimeline, setShowTimeline] = useState(false);
+  return (
+    <div className="rounded-lg border border-line bg-surface">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+        <span className="text-[0.6875rem] font-semibold tracking-wide text-ink-2">{label}</span>
+        <span className="flex-1" />
+        {parts.length > 0 && <span className="font-mono text-[0.625rem] text-ink-3">{parts.join(" · ")}</span>}
+      </div>
+      <div className="px-3 py-2.5 text-[0.8125rem] leading-[1.6] text-ink">{summary.text}</div>
+      {(kind === "completed" && onFollowUp) || (timeline && timeline.length > 0) ? (
+        <div className="flex items-center gap-1 border-t border-line px-3 py-1.5">
+          {kind === "completed" && onFollowUp && (
+            <button
+              type="button"
+              onClick={onFollowUp}
+              title="基于这条总结，继续完成建议的下一步"
+              className="rounded-pill border border-line bg-surface px-3 py-1 text-[0.6875rem] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              继续下一步 →
+            </button>
+          )}
+          {timeline && timeline.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowTimeline((v) => !v)}
+              className="inline-flex items-center gap-1 rounded-pill px-2 py-1 text-[0.6875rem] text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              执行轨迹
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className={cn("transition-transform", showTimeline && "rotate-180")}>
+                <path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+        </div>
+      ) : null}
+      {showTimeline && timeline && timeline.length > 0 && (
+        <div className="space-y-0.5 border-t border-line px-3 py-2">
+          {timeline.map((t, i) => (
+            <div key={i} className="flex items-center gap-2 font-mono text-[0.625rem] leading-5">
+              <span className={cn("h-1 w-1 shrink-0 rounded-full", t.status === "error" ? "bg-danger" : t.status === "running" ? "bg-live" : "bg-success")} />
+              <span className="shrink-0 text-ink-2">{t.tool}</span>
+              {t.title && <span className="min-w-0 truncate text-ink-3" title={t.title}>{t.title}</span>}
+              {typeof t.durationMs === "number" && <span className="ml-auto shrink-0 text-ink-3">{(t.durationMs / 1000).toFixed(1)}s</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice }: Props) {
+  const { messages, todos, reads, summary, editedPaths, checkpoint } = data;
   // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
   const visible = useMemo(() => {
@@ -274,6 +410,38 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
     return [...messages, echoMessage];
   }, [messages, echo]);
   const running = status === "running";
+  // N6 实时进度：运行中当前工具 = 所有消息里最后一个 status==="running" 的 tool。
+  // 从投影快照反向找（不额外订阅），rAF 批量渲染已保证实时性足够。
+  const currentTool = useMemo(() => {
+    if (!running) return null;
+    for (let i = visible.length - 1; i >= 0; i--) {
+      const m = visible[i]!;
+      for (let j = m.parts.length - 1; j >= 0; j--) {
+        const p = m.parts[j]!.part;
+        if (p.type === "tool" && p.state.status === "running") return p.tool;
+      }
+    }
+    return null;
+  }, [visible, running]);
+  // 续跑断点上下文：从中断前的已投影数据拼出「进行到哪」的显式描述，
+  // 让「继续」不再裸发二字——模型能明确知道自己已做/未做的部分。
+  const buildContinueContext = useMemo(() => {
+    return (m: UiMessage): string => {
+      const done = todos?.filter((t) => t.status === "completed").length ?? 0;
+      const total = todos?.length ?? 0;
+      const toolParts = m.parts.map((p) => p.part).filter((p): p is Extract<Part, { type: "tool" }> => p.type === "tool");
+      const lastTool = toolParts[toolParts.length - 1]?.tool;
+      const errName = m.error?.name ?? "";
+      const errMsg = m.error?.message ?? "";
+      const lines: string[] = ["（续跑提示：上一次任务中断了，请接着完成，不要从头重做。）"];
+      if (total > 0) lines.push(`- 已完成的步骤：${done}/${total}`);
+      if (lastTool) lines.push(`- 中断前最后一步工具调用：${lastTool}`);
+      if (editedPaths.length > 0) lines.push(`- 已经改动过的文件：${editedPaths.slice(0, 5).join("、")}${editedPaths.length > 5 ? ` 等 ${editedPaths.length} 个` : ""}`);
+      if (errName) lines.push(`- 中断原因：${errName}${errMsg ? `（${errMsg}）` : ""}`);
+      lines.push("请基于以上进度继续，直接开始未完成的部分。");
+      return lines.join("\n");
+    };
+  }, [todos, editedPaths]);
   // 断线时长：从进入非 connected 状态开始计时，恢复即清零（横幅展示「已断 Xs」）
   const [downSince, setDownSince] = useState<number | null>(null);
   const [downSeconds, setDownSeconds] = useState(0);
@@ -408,6 +576,17 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
             : `连接中断，正在恢复…（已断 ${downSeconds}s，恢复后自动补齐缺失消息）`}
         </div>
       )}
+      {/* N6 卡住检测横幅：运行中超过 60s 无新事件，可能卡在长工具调用/上游无响应。
+          给用户主动感知，可中止；framework 看门狗 300s 会兜底报错。 */}
+      {stalled && running && (
+        <div className="flex h-7 shrink-0 items-center gap-2 border-b border-warning/30 bg-warning-tint px-4 text-[0.6875rem] text-warning">
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-warning" />
+          已超过 60s 无新进展，可能卡在长任务或上游无响应——可等待，或
+          <button type="button" onClick={onAbort} className="font-medium underline underline-offset-2 hover:text-ink">
+            中止
+          </button>
+        </div>
+      )}
       {/* 隔离副本操作结果横幅（合并成功 / 冲突引导 / 丢弃确认） */}
       {wtNotice && (
         <div
@@ -461,6 +640,8 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
         <div className="py-2 text-center text-[0.6875rem] text-ink-3">上滑加载更早消息…</div>
       )}
       {todos && todos.length > 0 && <TodoCard todos={todos} />}
+      {/* N6 实时进度：运行中展示「正在执行第 N 步 · 当前工具」，取代单一状态点 */}
+      {running && visible.length > 0 && <LiveProgressBar todos={todos ?? []} currentTool={currentTool} />}
         {visible.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-2">
@@ -527,58 +708,99 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
             );
           }
           // Agent 消息：全宽开放排版（主流惯例：无头像无标签，运行指示放内容尾部）
-          // M3：连续已完成的普通工具折叠为 ToolGroup 摘要行（防瀑布淹没正文）——
-          // 任何运行中/失败/带 diff/其他类型片段都会把组切断
+          // M3 + N5 步骤条：整条消息里「已完成的普通工具」统一收拢成一个可展开的
+          // ToolGroup 步骤条（挂在非工具内容之后），不再被 text/reasoning 打断成多个
+          // 小组——长工具链（几十次调用）也只占一行摘要，点开才看细节。运行中/失败/
+          // 带 diff 的工具仍原位展示（它们需要即时反馈，不折叠）。
           const blocks: React.ReactNode[] = [];
-          let group: UiPart[] = [];
-          const flushGroup = (keyPrefix: string) => {
-            if (!group.length) return;
-            if (group.length === 1) {
-              const p = group[0]!;
-              blocks.push(
-                <PartView key={`${keyPrefix}-tool-${p.part.id}`} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} subagent={p.subagent} />,
-              );
-            } else {
-              blocks.push(
-                <ToolGroup
-                  key={`${keyPrefix}-toolgrp-${group[0]!.part.id}`}
-                  calls={group.map((p) => {
-                    const t = p.part as Extract<Part, { type: "tool" }>;
-                    return { id: t.callId, tool: t.tool, state: t.state };
-                  })}
-                  sessionIdle={false}
-                />,
-              );
-            }
-            group = [];
-          };
+          const doneTools: UiPart[] = [];
           for (const p of m.parts) {
             const plainDone = p.part.type === "tool" && p.part.state.status === "completed" && !p.diff && !p.subagent;
             if (plainDone) {
-              group.push(p);
+              doneTools.push(p);
               continue;
             }
-            flushGroup(m.id);
             blocks.push(
               <PartView key={`${m.id}-part-${p.part.id}`} part={p.part} diff={p.diff} markdown onOpenFile={onOpenFile} subagent={p.subagent} />,
             );
           }
-          flushGroup(m.id);
+          if (doneTools.length > 0) {
+            blocks.push(
+              <ToolGroup
+                key={`${m.id}-toolgrp`}
+                calls={doneTools.map((p) => {
+                  const t = p.part as Extract<Part, { type: "tool" }>;
+                  return { id: t.callId, tool: t.tool, state: t.state };
+                })}
+                sessionIdle={false}
+              />,
+            );
+          }
           return (
             <div key={m.id} className="space-y-2.5 [content-visibility:auto] [contain-intrinsic-size:auto_120px]">
               {blocks}
               {m.error && (
                 <div className="rounded-sm border border-danger/40 bg-danger/5 px-3 py-2 text-xs leading-5 text-danger">
-                  上游请求失败（{m.error.name}）：{m.error.message}
+                  <div>上游请求失败（{m.error.name}）：{m.error.message}</div>
+                  {/* N5 失败自动诊断：已知错误映射「原因 + 建议」，替代干巴巴的报错 */}
+                  {(() => {
+                    const d = diagnoseError(m.error.name, m.error.message);
+                    if (!d) return null;
+                    return (
+                      <div className="mt-1.5 space-y-0.5 border-t border-danger/20 pt-1.5 text-[0.6875rem] leading-5">
+                        <div className="text-ink-2"><span className="font-medium text-ink">可能原因：</span>{d.cause}</div>
+                        <div className="text-ink-3"><span className="font-medium text-ink-2">建议：</span>{d.hint}</div>
+                      </div>
+                    );
+                  })()}
+                  {/* N5 断点显式化：中断时展示「已完成进度 + 最后一步」，让用户
+                      一眼知道进行到哪、还剩什么，而非只有一条干巴巴的报错。 */}
+                  {idx === visible.length - 1 && !running && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-danger/20 pt-1.5 text-[0.6875rem] text-ink-2">
+                      {(() => {
+                        const done = todos?.filter((t) => t.status === "completed").length ?? 0;
+                        const total = todos?.length ?? 0;
+                        const lastTool = m.parts
+                          .map((p) => p.part)
+                          .filter((p): p is Extract<Part, { type: "tool" }> => p.type === "tool")
+                          .pop()?.tool;
+                        return (
+                          <>
+                            {total > 0 && <span>已完成 {done}/{total} 个步骤</span>}
+                            {lastTool && <span>最后一步：<span className="font-mono">{lastTool}</span></span>}
+                            {/* N6 中途快照：长任务运行中落过 checkpoint，中断时展示「已执行 N 个工具 · 耗时」 */}
+                            {checkpoint && (
+                              <span>
+                                已执行 <span className="font-mono">{checkpoint.toolCalls}</span> 个工具
+                                {typeof checkpoint.elapsedMs === "number" ? ` · ${(checkpoint.elapsedMs / 1000).toFixed(0)}s` : ""}
+                              </span>
+                            )}
+                            <span className="text-ink-3">点「继续」在同一会话续跑</span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
-              {/* P1 一键继续：最后一条 assistant 消息带错误且会话已空闲 → 错误卡下方出「继续」chip */}
+              {/* P1 一键继续：最后一条 assistant 消息带错误且会话已空闲 → 错误卡下方出「继续」chip。
+                  续跑会带上断点上下文（进度/改过文件/最后一步/原因），模型能接上而非从头发散。 */}
               {m.error && isAssistant && idx === visible.length - 1 && !running && !pending && (
                 <div className="pt-0.5">
                   <button
                     type="button"
-                    onClick={() => onSend("继续")}
-                    title="在同一会话继续上次中断的任务"
+                    onClick={() => {
+                      // N6 幂等提示：上次已改过文件，续跑可能重复操作 → 先确认
+                      const ctx = buildContinueContext(m);
+                      if (editedPaths.length > 0) {
+                        if (window.confirm(`上次已改动 ${editedPaths.length} 个文件。继续会在这些改动基础上接着做，不会自动回滚。是否继续？`)) {
+                          onContinue(ctx);
+                        }
+                      } else {
+                        onContinue(ctx);
+                      }
+                    }}
+                    title="带断点上下文在同一会话继续（进度、已改文件、最后一步）"
                     className="rounded-pill border border-line bg-surface px-3 py-1 text-[0.6875rem] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
                   >
                     继续
@@ -594,6 +816,35 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
             </div>
           );
         })}
+        {/* 任务终态小结（N5）：run 收尾的 AI 一句总结，挂在消息流末尾。
+            只在非 running 时显示——running 时 summary 尚未生成（终态才发）。
+            N6：总结卡带「继续下一步」按钮 + 可展开「执行轨迹」时间线。 */}
+        {summary && !running && (
+          <SummaryCard
+            summary={summary}
+            timeline={(() => {
+              const items: TimelineItem[] = [];
+              for (const m of messages) {
+                for (const p of m.parts) {
+                  if (p.part.type !== "tool") continue;
+                  const st = p.part.state;
+                  const start = "time" in st && st.time?.start ? Date.parse(st.time.start) : null;
+                  const end = st.status === "completed" || st.status === "error" ? ("time" in st && st.time?.end ? Date.parse(st.time.end) : null) : null;
+                  items.push({
+                    tool: p.part.tool,
+                    title: "title" in st && st.title ? st.title : undefined,
+                    status: st.status,
+                    durationMs: start && end ? end - start : null,
+                  });
+                }
+              }
+              return items;
+            })()}
+            onFollowUp={() =>
+              onSend(`基于上面的任务总结，请继续完成你建议的下一步工作，直接开始执行。\n\n（上一轮总结：${summary.text}）`)
+            }
+          />
+        )}
         {pending && (
           <PermissionCard
             request={{ id: pending.id, permission: pending.permission, patterns: pending.patterns, metadata: pending.metadata }}

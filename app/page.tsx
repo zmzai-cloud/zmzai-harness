@@ -256,6 +256,24 @@ export default function App() {
   const toggleBottomPanel = useCallback(() => {
     setBottomPanelOpen((value) => !value);
   }, []);
+  // 任务完成前台 toast（N5）：前台盯着的用户也要有明确完成感知，而非只有状态点变色。
+  const [doneToast, setDoneToast] = useState<string | null>(null);
+  // N6 卡住检测：运行中最后事件时间（subscribe 回调每次事件到达时刷新），
+  // 超过阈值仍无新事件 → 提示「可能卡住」。看门狗在 framework 层 300s 兜底，
+  // 这里 60s 提前给用户一个主动感知（更早、可中止）。
+  const lastEventAtRef = useRef<number>(Date.now());
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    if (status !== "running") {
+      setStalled(false);
+      return;
+    }
+    lastEventAtRef.current = Date.now();
+    const t = setInterval(() => {
+      setStalled(Date.now() - lastEventAtRef.current > 60_000);
+    }, 5_000);
+    return () => clearInterval(t);
+  }, [status]);
 
   // P2-12 全局快捷键：⌘K 命令 / ⌘P 文件 / ⌘⇧F 全文搜索（输入类元素聚焦时不抢）
   useEffect(() => {
@@ -334,6 +352,7 @@ export default function App() {
     // 隔离副本状态以服务端为准（worktree 映射在 worktrees.db）
     client.worktreeStatus(activeId).then((st) => !cancelled && setActiveIsolation(st)).catch(() => undefined);
     const unsub = client.subscribe(activeId, (ev) => {
+      lastEventAtRef.current = Date.now();
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
         const req = (ev.data as { request: PermissionRequest }).request;
@@ -400,20 +419,51 @@ export default function App() {
     }
   }, [activeId, flushProjection]);
 
-  // P2-14 任务完成通知：running → idle 且窗口不在前台时系统通知 + 标题标记。
-  // Electron 下优先走主进程 Notification（未聚焦更可靠），Web 走 Web Notification。
+  // P2-14 任务完成通知：running → idle 时——后台窗口弹系统通知；前台弹页内 toast
+  // （不再只在隐藏时提示，盯着的用户也有明确「完成了」的落点）。两者都触发。
   const prevStatusRef = useRef(status);
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (prev === "running" && status === "idle") {
       document.title = "✓ 任务完成 — Lectern";
+      // 前台 toast：轻提示，4s 自动消退
+      setDoneToast("任务已完成");
+      const timer = setTimeout(() => setDoneToast(null), 4000);
       const bridge = window.lecternNative;
       if (document.hidden && bridge?.notifyTaskDone) {
         bridge.notifyTaskDone();
       } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {
         new Notification("Lectern", { body: "任务已完成，回来看看结果" });
       }
+      // N6 完成提示音：短促双音 beep（Web Audio，无需资源文件），静默失败不阻塞。
+      // 只在后台窗口时播放——前台已弹 toast，避免打扰。
+      if (document.hidden) {
+        try {
+          const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (Ctx) {
+            const ctx = new Ctx();
+            const play = (freq: number, start: number, dur: number) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = "sine";
+              osc.frequency.value = freq;
+              gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+              gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + start + 0.02);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+              osc.connect(gain).connect(ctx.destination);
+              osc.start(ctx.currentTime + start);
+              osc.stop(ctx.currentTime + start + dur);
+            };
+            play(880, 0, 0.15);
+            play(1174.66, 0.15, 0.2);
+            setTimeout(() => void ctx.close(), 600);
+          }
+        } catch {
+          /* 提示音失败静默跳过 */
+        }
+      }
+      return () => clearTimeout(timer);
     } else if (status === "running") {
       document.title = "Lectern";
     }
@@ -534,6 +584,25 @@ export default function App() {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
   }, []);
 
+  // N6 置顶/归档：更新服务端 + 本地列表即时反馈
+  const togglePinned = useCallback(async (id: string) => {
+    const target = sessions.find((s) => s.id === id);
+    if (!target) return;
+    await client.setSessionPinned(id, !target.pinned);
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned: !s.pinned } : s)));
+  }, [sessions]);
+
+  const toggleArchived = useCallback(async (id: string) => {
+    const target = sessions.find((s) => s.id === id);
+    if (!target) return;
+    await client.setSessionArchived(id, !target.archived);
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, archived: !s.archived } : s)));
+    if (target.archived === false) {
+      // 归档后若正选中则取消选中
+      setActiveId((cur) => (cur === id ? null : cur));
+    }
+  }, [sessions]);
+
   const deleteSession = useCallback(async (id: string) => {
     await client.deleteSession(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -591,6 +660,16 @@ export default function App() {
       {/* 命令面板的「新建会话」需要拿最新 newSession */}
       <PaletteBridge bridge={paletteActionsRef} action={newSession} />
 
+      {/* 任务完成前台 toast（N5）：轻提示，自动消退，不打断操作 */}
+      {doneToast && (
+        <div className="pointer-events-none fixed left-1/2 top-14 z-50 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-[0.8125rem] font-medium text-ink shadow-md">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            {doneToast}
+          </div>
+        </div>
+      )}
+
       {/* 四区工作台：会话栏 | 对话 | 右侧工作区，底部独立承载终端与后续调试工具。 */}
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
@@ -607,6 +686,8 @@ export default function App() {
           onSelectSession={selectSession}
           onRenameSession={(id, title) => void renameSession(id, title)}
           onDeleteSession={(id) => void deleteSession(id)}
+          onTogglePinned={(id) => void togglePinned(id)}
+          onToggleArchived={(id) => void toggleArchived(id)}
         />
         )}
         {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onChange={setSidebarWidth} />}
@@ -624,6 +705,8 @@ export default function App() {
               onSelectModel={setSelectedModel}
               onSend={send}
               onReply={reply}
+              onContinue={(ctx) => void send(ctx)}
+              stalled={stalled}
               onAbort={abort}
               onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
               autoMode={autoMode}

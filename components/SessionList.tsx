@@ -32,20 +32,25 @@ type Props = {
   onSelectSession: (id: string) => void;
   onRenameSession: (id: string, title: string) => void;
   onDeleteSession: (id: string) => void;
+  /** N6 置顶/归档（服务端持久化，父组件即时反馈）。 */
+  onTogglePinned: (id: string) => void;
+  onToggleArchived: (id: string) => void;
   width?: number;
 };
 
-export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession, width }: Props) {
+export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession, onTogglePinned, onToggleArchived, width }: Props) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  // N6 归档视图：默认只看未归档；切「已归档」看归档会话
+  const [showArchived, setShowArchived] = useState(false);
   // 标题/代理/模型/项目名任意字段命中即保留
-  const filtered = query.trim()
-    ? sessions.filter((s) =>
-        `${s.title} ${s.agent} ${s.model?.modelId ?? ""} ${s.projectName ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()),
-      )
-    : sessions;
+  const filtered = sessions
+    .filter((s) => (showArchived ? !!s.archived : !s.archived))
+    .filter((s) => (query.trim() ? `${s.title} ${s.agent} ${s.model?.modelId ?? ""} ${s.projectName ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()) : true))
+    // 置顶优先（仅未归档视图生效）
+    .sort((a, b) => (showArchived ? 0 : Number(!!b.pinned) - Number(!!a.pinned)));
   return (
     <aside className="flex shrink-0 flex-col border-r border-line bg-surface" style={width ? { width } : undefined}>
       {/* 项目切换器（关联本地文件夹） */}
@@ -97,8 +102,25 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
       {/* 会话列表：节头（标题 + 搜索切换） + 列表 */}
       <div className="flex min-h-0 flex-1 flex-col pt-3">
         <div className="flex shrink-0 items-center justify-between gap-2 pl-4 pr-2.5 pb-1">
-          <span className="text-[0.6875rem] font-semibold tracking-wide text-ink-3">会话</span>
+          <span className="text-[0.6875rem] font-semibold tracking-wide text-ink-3">{showArchived ? "已归档" : "会话"}</span>
           <div className="flex items-center gap-1">
+            {/* N6 归档视图切换 */}
+            <button
+              type="button"
+              title={showArchived ? "返回会话列表" : "查看已归档会话"}
+              onClick={() => setShowArchived((v) => !v)}
+              className={cn(
+                "flex h-6 items-center gap-1 rounded-sm px-1.5 text-[0.625rem] transition-colors hover:text-ink",
+                showArchived ? "text-ink" : "text-ink-3",
+              )}
+            >
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <rect x="2.5" y="3" width="11" height="10" rx="1.2" />
+                <path d="M5.5 3V2.5A1 1 0 0 1 6.5 1.5h3A1 1 0 0 1 10.5 2.5V3" />
+                <path d="M2.5 6.5h11" />
+              </svg>
+              <span>归档</span>
+            </button>
             {searchOpen && (
               <input
                 autoFocus
@@ -137,6 +159,9 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
           {query.trim() && filtered.length === 0 && (
             <div className="px-3 py-4 text-xs text-ink-3">没有匹配的会话。</div>
           )}
+          {!query.trim() && filtered.length === 0 && showArchived && (
+            <div className="px-3 py-4 text-xs text-ink-3">没有归档的会话。</div>
+          )}
           {filtered.map((s) => {
             const renaming = editingId === s.id;
             return (
@@ -172,8 +197,13 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                   />
                 ) : (
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className={cn("truncate text-[0.8125rem] font-medium", activeId === s.id ? "text-ink" : "text-ink-2")}>
-                      {s.title || "未命名会话"}
+                    <span className={cn("flex min-w-0 items-center gap-1 truncate text-[0.8125rem] font-medium", activeId === s.id ? "text-ink" : "text-ink-2")}>
+                      {s.pinned && (
+                        <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 text-ink-3">
+                          <path d="M9.5 2.5l4 4L6 14l-1-1 2-2-3.5.5L3 11l3-3-3.5-1 1-1L8 5.5l1-1L9.5 2.5z" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                      <span className="truncate">{s.title || "未命名会话"}</span>
                     </span>
                     <span className="shrink-0 font-mono text-[0.625rem] text-ink-3 group-hover:invisible">
                       {timeLabel(s.time.updated ?? s.time.created)}
@@ -181,22 +211,70 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                   </div>
                 )}
                 <div className="mt-0.5 flex items-center gap-1.5 truncate text-[0.6875rem] text-ink-3">
-                  {/* P2-15 多会话并行状态点 */}
-                  <span
-                    title={s.running ? "运行中" : "空闲"}
-                    className={cn(
-                      "h-1.5 w-1.5 shrink-0 rounded-full",
-                      s.running ? "animate-pulse bg-live" : "bg-ink-3",
-                    )}
-                  />
+                  {/* P2-15 多会话并行状态点 → N5 升级为三态：运行中 / 完成 / 中断 / 失败 */}
+                  {(() => {
+                    const outcome = s.running ? "running" : (s.lastOutcome ?? (s.title ? "completed" : "idle"));
+                    const dot =
+                      outcome === "running"
+                        ? "animate-pulse bg-live"
+                        : outcome === "aborted"
+                          ? "bg-warning"
+                          : outcome === "error"
+                            ? "bg-danger"
+                            : outcome === "completed"
+                              ? "bg-success"
+                              : "bg-ink-3";
+                    const label =
+                      outcome === "running"
+                        ? "运行中"
+                        : outcome === "aborted"
+                          ? "中断"
+                          : outcome === "error"
+                            ? "失败"
+                            : outcome === "completed"
+                              ? "完成"
+                              : "空闲";
+                    return <span title={label} className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dot)} />;
+                  })()}
                   <span className="truncate">
                     {s.agent}
                     {s.model ? ` · ${s.model.providerId}/${s.model.modelId}` : ""}
                   </span>
+                  {typeof s.messageCount === "number" && s.messageCount > 0 && (
+                    <span className="shrink-0 font-mono text-[0.625rem] text-ink-3">{s.messageCount} 条</span>
+                  )}
                 </div>
-                {/* hover 操作：重命名 / 删除 */}
+                {/* hover 操作：置顶 / 归档 / 重命名 / 删除 */}
                 {!renaming && (
                   <div className="absolute right-1.5 top-1.5 hidden items-center gap-0.5 group-hover:flex">
+                    <button
+                      type="button"
+                      title={s.pinned ? "取消置顶" : "置顶"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePinned(s.id);
+                      }}
+                      className={cn("flex h-5 w-5 items-center justify-center rounded-sm bg-surface transition-colors", s.pinned ? "text-accent" : "text-ink-3 hover:text-ink")}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill={s.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4">
+                        <path d="M9.5 2.5l4 4L6 14l-1-1 2-2-3.5.5L3 11l3-3-3.5-1 1-1L8 5.5l1-1L9.5 2.5z" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title={s.archived ? "取消归档" : "归档"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleArchived(s.id);
+                      }}
+                      className="flex h-5 w-5 items-center justify-center rounded-sm bg-surface text-ink-3 transition-colors hover:text-ink"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                        <rect x="2.5" y="3" width="11" height="10" rx="1.2" />
+                        <path d="M5.5 3V2.5A1 1 0 0 1 6.5 1.5h3A1 1 0 0 1 10.5 2.5V3" />
+                        <path d="M2.5 6.5h11" />
+                      </svg>
+                    </button>
                     <button
                       type="button"
                       title="重命名"

@@ -90,6 +90,14 @@ export const client = {
   renameSession: (sessionId: string, title: string) =>
     send("PATCH", `/api/sessions/${sessionId}`, { title }).then((r) => j<{ ok?: boolean; error?: string }>(r)),
 
+  /** 置顶/取消置顶（N6）：置顶会话排列表最前。 */
+  setSessionPinned: (sessionId: string, pinned: boolean) =>
+    send("PATCH", `/api/sessions/${sessionId}`, { pinned }).then((r) => j<{ ok?: boolean; error?: string }>(r)),
+
+  /** 归档/取消归档（N6）：归档会话从默认列表隐藏。 */
+  setSessionArchived: (sessionId: string, archived: boolean) =>
+    send("PATCH", `/api/sessions/${sessionId}`, { archived }).then((r) => j<{ ok?: boolean; error?: string }>(r)),
+
   deleteSession: (sessionId: string) =>
     send("DELETE", `/api/sessions/${sessionId}`).then((r) => j<{ ok?: boolean; error?: string }>(r)),
 

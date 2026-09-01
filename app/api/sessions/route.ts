@@ -25,8 +25,12 @@ export async function GET(request: NextRequest) {
         try {
           const store = project.id === active.id ? runtime.store : projectStore(project.id);
           const sessions = await store.listSessions({ userId: "local", workspaceId: "local" });
+          // N6 消息计数：批量 GROUP BY 拿本项目全量，避免逐会话 N+1
+          const counts = typeof (store as unknown as { countMessagesBySession?: () => Promise<Map<string, number>> }).countMessagesBySession === "function"
+            ? await (store as unknown as { countMessagesBySession: () => Promise<Map<string, number>> }).countMessagesBySession()
+            : new Map<string, number>();
           for (const s of sessions) {
-            merged.push({ ...s, running: isSessionActive(s.id), projectId: project.id, projectName: project.name });
+            merged.push({ ...s, running: isSessionActive(s.id), messageCount: counts.get(s.id) ?? 0, projectId: project.id, projectName: project.name });
           }
         } catch {
           /* 单项目库异常不影响整体列表 */
@@ -37,8 +41,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(merged);
   }
   const sessions = await runtime.store.listSessions({ userId: "local", workspaceId: "local" });
+  // N6 消息计数：批量 GROUP BY 拿全量，避免逐会话 N+1
+  const counts = typeof (runtime.store as unknown as { countMessagesBySession?: () => Promise<Map<string, number>> }).countMessagesBySession === "function"
+    ? await (runtime.store as unknown as { countMessagesBySession: () => Promise<Map<string, number>> }).countMessagesBySession()
+    : new Map<string, number>();
   // 附带运行态（P2-15 多会话并行状态点）：runner 的 activeRuns 内存表
-  const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id) }));
+  const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id), messageCount: counts.get(s.id) ?? 0 }));
   return NextResponse.json(withStatus);
 }
 

@@ -19,6 +19,14 @@ export type SessionInfo = {
   time: { created: string; updated?: string };
   /** 运行态（GET /api/sessions 附带，来自 runner activeRuns）。 */
   running?: boolean;
+  /** 最近一次 run 的终态（N5）：completed/aborted/error，会话列表三态用。 */
+  lastOutcome?: "completed" | "aborted" | "error";
+  /** 消息数（N6，GET /api/sessions 附带，批量 GROUP BY 填充）。 */
+  messageCount?: number;
+  /** 置顶（N6）：列表置顶展示。 */
+  pinned?: boolean;
+  /** 归档（N6）：归档后从默认列表隐藏。 */
+  archived?: boolean;
   /** 会话级 worktree 隔离状态（POST /api/sessions 创建时附带；切换会话经 worktree status 查询）。 */
   isolation?: SessionIsolation;
 }
@@ -64,6 +72,14 @@ export type PermissionRequest = {
 };
 
 export type LecternEvent = { type: string; data: unknown };
+
+/** 任务终态小结（framework session.summary 事件，N5）：
+ *  run 收尾时 summary 模型生成的一句总结 + 本轮结构化统计。 */
+export type SessionSummary = {
+  text: string;
+  kind: "completed" | "aborted" | "error";
+  meta?: { filesEdited: number; toolCalls: number; durationMs: number };
+};
 
 /** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
 export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string } }; parts: Part[] };

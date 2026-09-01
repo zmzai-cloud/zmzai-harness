@@ -1,4 +1,4 @@
-import type { LecternEvent, Part, TranscriptMessage } from "./types";
+import type { LecternEvent, Part, TranscriptMessage, SessionSummary } from "./types";
 
 /** ChatView 消息树的数据类型与投影器。
  *
@@ -21,9 +21,21 @@ export type ChatViewData = {
   reads: string[];
   /** 本轮 Agent 编辑/写入过的文件（file.edited 去重，最新在前）——看板联动用。 */
   editedPaths: string[];
+  /** 任务终态小结（session.summary，N5）：最近一次 run 收尾的 AI 总结 + 统计。 */
+  summary: SessionSummary | null;
+  /** 长任务中途进度快照（session.checkpoint，N6）：最近一次运行中的「中间落点」，
+   *  中断后据此提示「上次进行到哪」（已执行 N 个工具 · 最后一步 · 耗时）。 */
+  checkpoint: SessionCheckpoint | null;
 };
 
-export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads: [], editedPaths: [] };
+/** 长任务中途进度快照（N6）。 */
+export type SessionCheckpoint = {
+  toolCalls: number;
+  lastTool?: string;
+  elapsedMs: number;
+};
+
+export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads: [], editedPaths: [], summary: null, checkpoint: null };
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成投影器可消费的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。
@@ -52,6 +64,10 @@ export class ChatProjector {
   private todos: TodoItem[] | null = null;
   private reads: string[] = [];
   private editedPaths: string[] = [];
+  /** 最近一次 run 终态小结（session.summary）。 */
+  private summary: SessionSummary | null = null;
+  /** 最近一次中途进度快照（session.checkpoint，N6）。 */
+  private checkpoint: SessionCheckpoint | null = null;
 
   /** 切会话时重置（复用实例避免反复分配）。 */
   reset(): void {
@@ -62,6 +78,8 @@ export class ChatProjector {
     this.todos = null;
     this.reads = [];
     this.editedPaths = [];
+    this.summary = null;
+    this.checkpoint = null;
   }
 
   /** 折叠单个事件（分支逻辑与原 project() 逐条对应，行为保持不变）。 */
@@ -133,6 +151,13 @@ export class ChatProjector {
         this.messages.set(id, { id, role: "assistant", parts: new Map(), error: err });
         this.order.push(id);
       }
+    } else if (ev.type === "session.summary") {
+      // 任务终态小结（N5）：run 收尾的 AI 一句总结 + 结构化统计。
+      // 覆盖式存储——一轮任务只有一条终态小结（多次 run 只保留最新）。
+      this.summary = ev.data as SessionSummary;
+    } else if (ev.type === "session.checkpoint") {
+      // 长任务中途进度快照（N6）：运行中的「中间落点」，覆盖式保留最新。
+      this.checkpoint = ev.data as SessionCheckpoint;
     } else if (ev.type === "subagent.started") {
       const d = ev.data as { id: string };
       this.subagentActivity.set(d.id, { steps: [] });
@@ -178,6 +203,8 @@ export class ChatProjector {
       todos: this.todos,
       reads: this.reads.slice(0, 8),
       editedPaths: [...this.editedPaths],
+      summary: this.summary,
+      checkpoint: this.checkpoint,
     };
   }
 }
