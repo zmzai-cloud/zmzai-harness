@@ -4,13 +4,38 @@ import { isSessionActive } from "@zmzai/agent-framework";
 
 import { resolveModel, sessionCookieName } from "@/lib/relay";
 import { cloudRuntime, activeWorkspaceRoot } from "@/lib/runtime";
+import { getActiveProject, listProjects, projectStore } from "@/lib/projects";
 import { createWorktree } from "@/lib/worktree";
+import type { SessionListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const runtime = cloudRuntime();
+  // 跨项目聚合（P1 会话稳定性：重启后找回任意项目的历史会话）：?all=1 时
+  // 逐项目库列会话并附归属；active 项目直接用 runtime.store，其余项目用
+  // 轻量 projectStore（只开 SQLite 读连接，不装配 MCP/runtime）。
+  if (request.nextUrl.searchParams.get("all") === "1") {
+    const projects = listProjects();
+    const active = getActiveProject();
+    const merged: SessionListItem[] = [];
+    await Promise.all(
+      projects.map(async (project) => {
+        try {
+          const store = project.id === active.id ? runtime.store : projectStore(project.id);
+          const sessions = await store.listSessions({ userId: "local", workspaceId: "local" });
+          for (const s of sessions) {
+            merged.push({ ...s, running: isSessionActive(s.id), projectId: project.id, projectName: project.name });
+          }
+        } catch {
+          /* 单项目库异常不影响整体列表 */
+        }
+      }),
+    );
+    merged.sort((a, b) => (b.time.updated ?? b.time.created).localeCompare(a.time.updated ?? a.time.created));
+    return NextResponse.json(merged);
+  }
   const sessions = await runtime.store.listSessions({ userId: "local", workspaceId: "local" });
   // 附带运行态（P2-15 多会话并行状态点）：runner 的 activeRuns 内存表
   const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id) }));

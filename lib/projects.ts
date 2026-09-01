@@ -6,6 +6,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { basename, resolve, sep } from "node:path";
+import { createSqliteSessionStore, type SqliteSessionStore } from "@zmzai/agent-framework";
 import { dataDir, defaultWorkspaceRoot } from "./runtime-constants";
 
 const projectsFile = resolve(dataDir, "projects.json");
@@ -83,6 +84,33 @@ export function addProject(rawPath: string): Project {
 export function dataDirFor(project: Project): string {
   if (project.id === DEFAULT_PROJECT.id) return dataDir;
   return resolve(dataDir, "projects", project.id);
+}
+
+/** 按项目 id 取数据目录（跨项目会话清理等场景；找不到项目时回落 active）。 */
+export function dataDirForId(id: string): string {
+  const project = id === DEFAULT_PROJECT.id ? DEFAULT_PROJECT : listProjects().find((p) => p.id === id);
+  return dataDirFor(project ?? getActiveProject());
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __lecternProjectStores: Map<string, SqliteSessionStore> | undefined;
+}
+
+/** 轻量 per-project store（跨项目会话列表 ?all=1 用）：只开一条 SQLite 连接读
+ *  会话库，不装配 runtime/MCP/终端。WAL 模式多连接并发读安全；globalThis
+ *  缓存避免 dev 热重载重复开连接。 */
+export function projectStore(id: string): SqliteSessionStore {
+  const cache = (globalThis.__lecternProjectStores ??= new Map());
+  const cached = cache.get(id);
+  if (cached) return cached;
+  const project = id === DEFAULT_PROJECT.id ? DEFAULT_PROJECT : load().projects.find((p) => p.id === id);
+  if (!project) throw new Error(`项目不存在: ${id}`);
+  const dir = dataDirFor(project);
+  mkdirSync(dir, { recursive: true });
+  const store = createSqliteSessionStore({ dataDir: dir });
+  cache.set(id, store);
+  return store;
 }
 
 /** 工作区路径逃逸守卫（fs API 公共入口）。 */

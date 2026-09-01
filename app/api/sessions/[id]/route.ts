@@ -2,8 +2,8 @@ import { rm, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { dataDirFor, getActiveProject } from "@/lib/projects";
-import { sessionRuntime } from "@/lib/runtime";
+import { dataDirForId } from "@/lib/projects";
+import { sessionStoreFor } from "@/lib/runtime";
 import { removeWorktree } from "@/lib/worktree";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +20,9 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   const title = body?.title?.trim();
   if (!title) return NextResponse.json({ error: "标题不能为空" }, { status: 400 });
 
-  const runtime = sessionRuntime(id);
-  const existing = await runtime.store.getSession(id);
-  if (!existing) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
-  await runtime.store.updateSession(id, { title: title.slice(0, 80) });
+  const found = await sessionStoreFor(id);
+  if (!found) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
+  await found.store.updateSession(id, { title: title.slice(0, 80) });
   return NextResponse.json({ ok: true });
 }
 
@@ -34,16 +33,15 @@ export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id:
   const { id } = await ctx.params;
   if (!SAFE_ID.test(id)) return NextResponse.json({ error: "非法会话 id" }, { status: 400 });
 
-  const runtime = sessionRuntime(id);
-  const existing = await runtime.store.getSession(id);
-  if (!existing) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
-  await runtime.store.deleteSession?.(id);
+  const found = await sessionStoreFor(id);
+  if (!found) return NextResponse.json({ error: "会话不存在" }, { status: 404 });
+  await found.store.deleteSession?.(id);
 
   // 隔离副本会话：worktree 目录与分支一并清理（未合并的提交随分支丢弃）
   await removeWorktree(id).catch(() => undefined);
 
   // 遗留 JSONL 清扫（store 未实现 deleteSession 的后端也能清到文件层）
-  const dir = dataDirFor(getActiveProject());
+  const dir = dataDirForId(found.projectId);
   await rm(path.join(dir, "sessions", `${id}.json`), { force: true });
   for (const kind of ["messages", "parts"] as const) {
     const kindDir = path.join(dir, kind);

@@ -14,6 +14,7 @@ import type {
   RelayKeyInfo,
   ProjectsState,
   SessionInfo,
+  SessionListItem,
   SessionIsolation,
   SkillOption,
   TerminalChunk,
@@ -64,7 +65,9 @@ export const client = {
 
   listAgents: () => fetch("/api/agents").then((r) => j<AgentInfo[]>(r)),
 
-  listSessions: () => fetch("/api/sessions").then((r) => j<SessionInfo[]>(r)),
+  /** 会话列表：all=true 跨项目聚合（附带 projectId/projectName 归属，按更新时间排序）。 */
+  listSessions: (all = false) =>
+    fetch(all ? "/api/sessions?all=1" : "/api/sessions").then((r) => j<SessionListItem[]>(r)),
 
   /** 会话全文搜索（消息文本 + 工具摘要），每会话取首个命中。 */
   searchSessions: (q: string) =>

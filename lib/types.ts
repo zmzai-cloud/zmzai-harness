@@ -21,7 +21,13 @@ export type SessionInfo = {
   running?: boolean;
   /** 会话级 worktree 隔离状态（POST /api/sessions 创建时附带；切换会话经 worktree status 查询）。 */
   isolation?: SessionIsolation;
-};
+}
+
+/** 跨项目会话列表条目（GET /api/sessions?all=1 附带归属；本项目会话两字段缺省）。 */
+export type SessionListItem = SessionInfo & {
+  projectId?: string;
+  projectName?: string;
+};;
 
 /** git worktree 隔离（robustness-plan §9）：隔离副本会话在独立 worktree 工作，合并前主工作区零污染。 */
 export type SessionIsolation = {

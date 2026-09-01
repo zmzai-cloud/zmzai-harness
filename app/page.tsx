@@ -12,8 +12,8 @@ import WorkbenchPanel from "@/components/WorkbenchPanel";
 import AccountBlock from "@/components/AccountBlock";
 import { client, type ConnectionState } from "@/lib/client";
 import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
-import { readPref, writePref } from "@/lib/prefs";
-import type { SessionInfo, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation } from "@/lib/types";
+import { readPref, writePref, clearPref } from "@/lib/prefs";
+import type { SessionInfo, SessionListItem, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation, Project } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
 function statusLabel(status: string): string {
@@ -39,8 +39,10 @@ function PaletteBridge({ bridge, action }: { bridge: React.RefObject<{ newSessio
 
 export default function App() {
   const router = useRouter();
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // 跨项目会话列表（P1）：当前项目条目（点击归属其它项目的会话 → 切项目 + 恢复会话）
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
   // 侧栏已去代理分组：会话固定用 default agent，模型选择交给底部 Composer（默认推荐）
   const activeAgent = "default";
   // 消息流投影：事件不再累积进 state（无限增长 + 每 delta 全量重投影 O(n²)），
@@ -91,6 +93,7 @@ export default function App() {
 
   useEffect(() => {
     void client.authStatus().then(setAuth);
+    void client.listProjects().then((s) => setActiveProject(s.active)).catch(() => undefined);
   }, []);
 
   // 投影快照的 rAF 批处理：同一帧内任意多条事件只触发一次渲染
@@ -137,8 +140,52 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void client.listSessions().then(setSessions);
+    void client.listSessions(true).then(setSessions);
   }, [auth?.loggedIn]);
+
+  // P1 会话稳定性：boot 恢复。pendingSession（跨项目跳转目标，switchProject+reload
+  // 前写入）优先——无条件恢复；否则恢复 lastSession（上次活跃会话，仅当前项目
+  // 库里存在时才恢复，防止项目切换后指向失效 id）。
+  const bootRestoredRef = useRef(false);
+  useEffect(() => {
+    if (bootRestoredRef.current || !auth?.loggedIn) return;
+    // 会话列表至少拉到一版再做恢复判断（空列表 = 真没有会话，不再等）
+    if (sessions.length === 0) {
+      bootRestoredRef.current = true;
+      return;
+    }
+    bootRestoredRef.current = true;
+    const pending = readPref("pendingSession");
+    clearPref("pendingSession");
+    const last = readPref("lastSession");
+    if (pending) setActiveId(pending);
+    else if (last && sessions.some((s) => s.id === last)) setActiveId(last);
+  }, [auth?.loggedIn, sessions]);
+
+  // lastSession 持久化：活跃会话变化即写（下次启动自动回到上次会话）
+  useEffect(() => {
+    if (activeId) writePref("lastSession", activeId);
+  }, [activeId]);
+
+  // 会话选择（P1 跨项目）：归属其它项目的会话 → switchProject（全站跟随语义）
+  // + pendingSession 暂存目标 + reload 后由上面的 boot 恢复逻辑选中。
+  const selectSession = useCallback(
+    (id: string) => {
+      if (id === activeId) return;
+      const target = sessions.find((s) => s.id === id);
+      const targetProject = target?.projectId ?? activeProject?.id ?? "default";
+      if (activeProject && targetProject !== activeProject.id) {
+        writePref("pendingSession", id);
+        void client
+          .switchProject(targetProject)
+          .then(() => window.location.reload())
+          .catch(() => clearPref("pendingSession"));
+        return;
+      }
+      setActiveId(id);
+    },
+    [activeId, activeProject, sessions],
+  );
 
   useEffect(() => {
     const projector = projectorRef.current ?? (projectorRef.current = new ChatProjector());
@@ -260,7 +307,7 @@ export default function App() {
     const start = () => {
       clearInterval(timer);
       timer = setInterval(() => {
-        void client.listSessions().then(setSessions).catch(() => undefined);
+        void client.listSessions(true).then(setSessions).catch(() => undefined);
       }, document.hidden ? 60_000 : 10_000);
     };
     const onVis = () => start();
@@ -319,8 +366,8 @@ export default function App() {
         setEcho(null); // 发送失败：撤回乐观气泡，错误经其它途径提示
       }
       // prompt 可能排队返回，刷新标题等元数据；AI 摘要标题异步落库，延迟再刷一次
-      void client.listSessions().then(setSessions);
-      setTimeout(() => void client.listSessions().then(setSessions), 4000);
+      void client.listSessions(true).then(setSessions);
+      setTimeout(() => void client.listSessions(true).then(setSessions), 4000);
     },
     [activeId, activeAgent, auth?.loggedIn, selectedModel, isolateNew],
   );
@@ -432,7 +479,8 @@ export default function App() {
           canCreate={!!auth?.loggedIn}
           isolateNew={isolateNew}
           onToggleIsolateNew={toggleIsolateNew}
-          onSelectSession={setActiveId}
+          onSelectSession={selectSession}
+          activeProjectId={activeProject?.id}
           onRenameSession={(id, title) => void renameSession(id, title)}
           onDeleteSession={(id) => void deleteSession(id)}
         />
@@ -469,7 +517,7 @@ export default function App() {
           mode={palette}
           commands={commands}
           onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
-          onSelectSession={(id) => setActiveId(id)}
+          onSelectSession={selectSession}
           onClose={() => setPalette(null)}
         />
       )}

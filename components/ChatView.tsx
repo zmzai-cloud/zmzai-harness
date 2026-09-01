@@ -572,6 +572,19 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
                   上游请求失败（{m.error.name}）：{m.error.message}
                 </div>
               )}
+              {/* P1 一键继续：最后一条 assistant 消息带错误且会话已空闲 → 错误卡下方出「继续」chip */}
+              {m.error && isAssistant && idx === visible.length - 1 && !running && !pending && (
+                <div className="pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onSend("继续")}
+                    title="在同一会话继续上次中断的任务"
+                    className="rounded-pill border border-line bg-surface px-3 py-1 text-[0.6875rem] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+                  >
+                    继续
+                  </button>
+                </div>
+              )}
               {lastActive && (
                 <div className="flex items-center gap-2 pt-0.5 text-[0.6875rem] text-live">
                   <span className="streaming-caret" />

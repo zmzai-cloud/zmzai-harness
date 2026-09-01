@@ -28,7 +28,7 @@ import { currentCookieHeader } from "./request-cookie";
 import { authHeaders, ollamaBase } from "./settings";
 import { relayBase } from "./relay";
 import { loadMcpConfig } from "./mcp-config";
-import { dataDirFor, getActiveProject, listProjects } from "./projects";
+import { dataDirFor, getActiveProject, listProjects, projectStore } from "./projects";
 import { worktreeForSession } from "./worktree";
 import { dataDir as baseDataDir, defaultWorkspaceRoot } from "./runtime-constants";
 
@@ -364,4 +364,22 @@ export function sessionRuntime(sessionId: string): AgentFramework {
   const wt = worktreeForSession(sessionId);
   if (wt) return runtimeFor(wt.projectPath, { workspaceRoot: wt.path });
   return cloudRuntime();
+}
+
+/** 会话所在项目的 store（跨项目重命名/删除用，P1）：先查 active 项目库，
+ *  再遍历其余项目库（轻量 projectStore）。找不到返回 null。 */
+export async function sessionStoreFor(id: string): Promise<{ store: SqliteSessionStore; projectId: string } | null> {
+  const active = getActiveProject();
+  const activeStore = cloudRuntime().store as SqliteSessionStore;
+  if (await activeStore.getSession(id)) return { store: activeStore, projectId: active.id };
+  for (const project of listProjects()) {
+    if (project.id === active.id) continue;
+    try {
+      const store = projectStore(project.id);
+      if (await store.getSession(id)) return { store, projectId: project.id };
+    } catch {
+      /* 单项目库异常跳过 */
+    }
+  }
+  return null;
 }

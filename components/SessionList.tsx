@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { cn } from "@zmzai/theme";
-import type { SessionInfo } from "@/lib/types";
+import type { SessionListItem } from "@/lib/types";
 
 function timeLabel(iso?: string): string {
   if (!iso) return "";
@@ -16,8 +16,10 @@ function timeLabel(iso?: string): string {
 }
 
 type Props = {
-  sessions: SessionInfo[];
+  sessions: SessionListItem[];
   activeId: string | null;
+  /** 当前项目 id（跨项目会话列表 ?all=1 的归属判定：不同则显示项目 tag）。 */
+  activeProjectId?: string;
   /** 顶部插槽（项目切换器）。 */
   top?: ReactNode;
   /** 底部插槽（账户块）。 */
@@ -34,15 +36,15 @@ type Props = {
   onDeleteSession: (id: string) => void;
 };
 
-export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession }: Props) {
+export default function SessionList({ sessions, activeId, activeProjectId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession }: Props) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
-  // 标题/代理/模型任意字段命中即保留
+  // 标题/代理/模型/项目名任意字段命中即保留
   const filtered = query.trim()
     ? sessions.filter((s) =>
-        `${s.title} ${s.agent} ${s.model?.modelId ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()),
+        `${s.title} ${s.agent} ${s.model?.modelId ?? ""} ${s.projectName ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()),
       )
     : sessions;
   return (
@@ -188,6 +190,15 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                       s.running ? "animate-pulse bg-live" : "bg-ink-3",
                     )}
                   />
+                  {/* P1 跨项目会话列表：归属其它项目的会话显示项目 tag（点击切项目恢复） */}
+                  {s.projectId && activeProjectId && s.projectId !== activeProjectId && (
+                    <span
+                      title={`归属项目：${s.projectName ?? s.projectId}`}
+                      className="shrink-0 max-w-24 truncate rounded-pill bg-surface-2 px-1.5 text-[0.625rem] font-medium text-ink-2"
+                    >
+                      {s.projectName ?? s.projectId}
+                    </span>
+                  )}
                   <span className="truncate">
                     {s.agent}
                     {s.model ? ` · ${s.model.providerId}/${s.model.modelId}` : ""}

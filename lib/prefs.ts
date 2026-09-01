@@ -30,3 +30,13 @@ export function writePref(key: string, value: string): void {
     /* 忽略：隐私模式 / 配额满等场景偏好不落盘 */
   }
 }
+
+export function clearPref(key: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PREFIX + key);
+    window.localStorage.removeItem(LEGACY_PREFIX + key);
+  } catch {
+    /* 忽略 */
+  }
+}
