@@ -19,7 +19,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build:mac": "bash scripts/build-mac.sh",
-    "build:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1"
+    "build:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1",
+    "build:win:cross": "bash scripts/build-win-cross.sh",
+    "build:win:cross:upload": "bash scripts/build-win-cross.sh --upload"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
