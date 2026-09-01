@@ -9,7 +9,7 @@ import "@xterm/xterm/css/xterm.css";
 
 /** VSCode Dark+ 终端配色。 */
 const VSC_THEME = {
-  background: "#1d1d1d",
+  background: "#1e1e22",
   foreground: "#cccccc",
   cursor: "#cccccc",
   cursorAccent: "#1d1d1d",
@@ -70,7 +70,7 @@ type Sess = {
  *   shell 解析在服务端 lib/shell.ts，面板只拿到探测结果。
  * - pty 后端：交互 shell 常驻；pipe 后端（无 node-pty）降级为「输入一行跑一条命令」。
  */
-export default function TerminalPane() {
+export default function TerminalPane({ sessionId }: { sessionId?: string | null }) {
   const [backend, setBackend] = useState<"pty" | "pipe">("pty");
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -88,6 +88,13 @@ export default function TerminalPane() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const obsRef = useRef<ResizeObserver | null>(null);
   const lineBufRef = useRef(""); // pipe 模式输入缓冲
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queuedResizeRef = useRef<{ id: string; cols: number; rows: number } | null>(null);
+  const appliedResizeRef = useRef(new Map<string, string>());
+  /** 容器上一次的真实像素尺寸：只有跨越取整阈值（cols/rows 变化）才值得 fit + 同步。 */
+  const lastBoxRef = useRef<{ w: number; h: number } | null>(null);
+  /** 上一次 fit 得到的网格：onResize 只在网格真的变化时才入队（防浮点取整抖动）。 */
+  const lastFitRef = useRef<{ cols: number; rows: number } | null>(null);
 
   useEffect(() => {
     defaultShellRef.current = defaultShell;
@@ -113,14 +120,46 @@ export default function TerminalPane() {
   }, []);
 
   /**
+   * xterm 在隐藏、展开和拖动布局的中间帧会短暂报告 0 行/列，并可能连续触发多次。
+   * 只同步有效的 PTY 网格，按最终尺寸合并，避免把布局噪声变成服务端请求。
+   * 去重以「已确认同步到服务端」的尺寸为准：相同尺寸绝不重发；抖动期间靠
+   * 较长的 debounce 只收敛到最后一次稳定尺寸。
+   */
+  const queueResize = useCallback((id: string, cols: number, rows: number) => {
+    if (backendRef.current !== "pty" || cols < 20 || cols > 500 || rows < 5 || rows > 200) return;
+    const size = `${cols}x${rows}`;
+    if (appliedResizeRef.current.get(id) === size) return;
+    const queued = queuedResizeRef.current;
+    if (queued?.id === id && queued.cols === cols && queued.rows === rows) return;
+    queuedResizeRef.current = { id, cols, rows };
+    if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    resizeTimerRef.current = setTimeout(() => {
+      resizeTimerRef.current = null;
+      const next = queuedResizeRef.current;
+      queuedResizeRef.current = null;
+      if (!next) return;
+      const nextSize = `${next.cols}x${next.rows}`;
+      if (appliedResizeRef.current.get(next.id) === nextSize) return;
+      void client.terminalResize(next.id, next.cols, next.rows)
+        .then(({ ok }) => {
+          if (ok) appliedResizeRef.current.set(next.id, nextSize);
+        })
+        .catch(() => undefined);
+    }, 250);
+  }, []);
+
+  /**
    * 起一条交互式 shell 会话并加入列表。
    * 不传 shell 时服务端用系统默认 shell；tab 名 = 「shell 名 + 同名序号」，
    * 同名多开时读作 zsh 1 / zsh 2，混开时读作 zsh 1 / bash 1。
    */
   const newSession = useCallback(async (shellFile?: string) => {
     try {
-      const s = await client.terminalStartShell(shellFile);
-      const label = s.name?.trim() || defaultShellRef.current?.label || "shell";
+      const s = await client.terminalStartShell(shellFile, sessionId, {
+        cols: termRef.current?.cols ?? 120,
+        rows: termRef.current?.rows ?? 30,
+      });
+      const label = (s.name?.trim().replace(/^lectern:[^:]+:/, "")) || defaultShellRef.current?.label || "shell";
       const file = shellFile ?? defaultShellRef.current?.file;
       const seq = sessionsRef.current.filter((x) => x.shell === label).length + 1;
       const sess: Sess = {
@@ -141,7 +180,7 @@ export default function TerminalPane() {
       );
       return null;
     }
-  }, []);
+  }, [sessionId]);
 
   /** 关闭会话：发 DELETE 回收子进程，从列表移除；若是当前激活会话则切到邻居。 */
   const killSession = useCallback(async (id: string) => {
@@ -165,7 +204,9 @@ export default function TerminalPane() {
     termRef.current?.reset();
     if (target.buffer) termRef.current?.write(target.buffer);
     setActiveId(id);
-  }, []);
+    const term = termRef.current;
+    if (term) queueResize(id, term.cols, term.rows);
+  }, [queueResize]);
 
   // 轮询循环：所有会话都读增量；只有激活会话写 xterm，否则只追加到会话 buffer。
   const startPoll = useCallback(() => {
@@ -182,8 +223,9 @@ export default function TerminalPane() {
             if (s.id === active) termRef.current?.write(chunk.output);
           }
           const next = chunk.session.status as Sess["status"];
+          const exited = next !== s.status && next !== "running";
           if (next !== s.status) s.status = next;
-          if (chunk.session.status !== "running" && s.status !== "killed") {
+          if (exited) {
             if (s.id === active) {
               termRef.current?.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
             }
@@ -204,7 +246,7 @@ export default function TerminalPane() {
       const { Terminal, FitAddon } = await loadXterm();
       if (disposed || !containerRef.current) return;
       const term = new Terminal({
-        fontSize: 12,
+        fontSize: 13,
         fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Code", monospace',
         lineHeight: 1.3,
         cursorBlink: true,
@@ -274,8 +316,17 @@ export default function TerminalPane() {
         void client.terminalInput(sess.id, d).catch(() => undefined);
       });
 
-      // 自适应尺寸
+      // 自适应尺寸：只在容器像素尺寸真的变化时才 fit。xterm 的 fit 会改 cols/rows，
+      // 触发 onResize；若每次 ResizeObserver fire（内容回流、滚动条、300ms 轮询的
+      // re-render）都无脑 fit，就会在取整边界抖动出不同 cols/rows，突破去重 → resize 请求刷屏。
       const obs = new ResizeObserver(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const box = el.getBoundingClientRect();
+        const prev = lastBoxRef.current;
+        // 首次（尚无基准）或尺寸变化超过 1px 才 fit；微小抖动直接忽略
+        if (prev && Math.abs(prev.w - box.width) < 1 && Math.abs(prev.h - box.height) < 1) return;
+        lastBoxRef.current = { w: box.width, h: box.height };
         try {
           fit.fit();
         } catch {
@@ -284,10 +335,18 @@ export default function TerminalPane() {
       });
       obs.observe(containerRef.current);
       obsRef.current = obs;
+      term.onResize(({ cols, rows }) => {
+        // fit 的浮点取整可能在相邻整数间抖动（如 86↔87 行）：网格没真变就不入队
+        const lastFit = lastFitRef.current;
+        if (lastFit && lastFit.cols === cols && lastFit.rows === rows) return;
+        lastFitRef.current = { cols, rows };
+        const active = activeIdRef.current;
+        if (active) queueResize(active, cols, rows);
+      });
 
       // 探测后端 + 系统 shell，然后补建/同步会话（重载时拉历史输出，避免黑屏）
       try {
-        const probe = await client.terminalList();
+        const probe = await client.terminalList(sessionId);
         if (disposed) return;
         setBackend(probe.backendKind);
         backendRef.current = probe.backendKind;
@@ -317,7 +376,7 @@ export default function TerminalPane() {
                 const c = await client.terminalRead(e.id, 0);
                 return {
                   id: e.id,
-                  name: label,
+                  name: label.replace(/^lectern:[^:]+:/, ""),
                   shell: label,
                   status: "running" as const,
                   buffer: c.output,
@@ -358,166 +417,75 @@ export default function TerminalPane() {
     return () => {
       disposed = true;
       obsRef.current?.disconnect();
-      // 卸载时关闭所有仍在运行的会话，避免孤儿 zsh
-      for (const s of sessionsRef.current) {
-        if (s.status === "running") void client.terminalKill(s.id).catch(() => undefined);
-      }
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = null;
+      queuedResizeRef.current = null;
+      lastBoxRef.current = null;
+      lastFitRef.current = null;
+      // 终端属于当前任务而非 React 组件；右栏收起、会话切换或重载都不应杀掉
+      // 用户正在运行的 shell。显式关闭 tab 才会结束对应进程。
       stopPoll();
       termRef.current?.dispose();
       termRef.current = null;
     };
+    // The terminal owner session is intentionally the remount boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId]);
 
   const activeSess = sessions.find((s) => s.id === activeId) ?? null;
-  const runningCount = sessions.filter((s) => s.status === "running").length;
-
   const iconBtn =
-    "flex h-6 w-6 items-center justify-center rounded-sm text-[#cccccc]/60 transition-colors hover:bg-white/10 hover:text-[#cccccc]";
+    "flex h-7 w-7 items-center justify-center rounded-[4px] text-[#b8b8bd] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7797e8]";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[#1d1d1d]">
-      {/* 头：左侧计数与新增；右侧清屏/重启 */}
-      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-white/10 px-2 text-[#cccccc]">
-        <span className="text-[0.6875rem] font-medium">{sessions.length} 个终端</span>
-        {backend === "pty" && (
-          <div className="relative flex items-center">
-            <button
-              type="button"
-              title={`新建终端（${defaultShell?.label ?? "系统 shell"}）`}
-              onClick={() => void newSession()}
-              className={iconBtn}
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-              </svg>
-            </button>
-            {shells.length > 1 && (
-              <button
-                type="button"
-                title="选择要启动的 shell"
-                onClick={() => setMenuOpen((v) => !v)}
-                className="flex h-6 w-4 items-center justify-center rounded-sm text-[#cccccc]/60 transition-colors hover:bg-white/10 hover:text-[#cccccc]"
-              >
-                <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
-                  <path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            )}
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute left-0 top-full z-20 mt-1 min-w-52 overflow-hidden rounded-md border border-white/10 bg-[#252526] py-1 shadow-lg">
-                  <div className="px-2.5 py-1 text-[0.625rem] uppercase tracking-wide text-[#cccccc]/40">
-                    选择 shell
-                  </div>
-                  {shells.map((sh, i) => (
-                    <button
-                      key={sh.file}
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        void newSession(sh.file);
-                      }}
-                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[0.6875rem] text-[#cccccc] transition-colors hover:bg-white/10"
-                    >
-                      <span className="font-medium">{sh.label}</span>
-                      {i === 0 && (
-                        <span className="rounded-pill bg-white/10 px-1.5 py-px text-[0.5625rem] text-[#cccccc]/70">
-                          默认
-                        </span>
-                      )}
-                      <span className="flex-1" />
-                      <span className="max-w-32 truncate text-[0.625rem] text-[#cccccc]/40">{sh.file}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-        {backend === "pipe" && (
-          <span className="text-[0.625rem] text-[#cccccc]/40">管道模式</span>
-        )}
-        {activeSess && (
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              activeSess.status === "running" ? "bg-[#0dbc79]" : "bg-[#666]",
-            )}
-            title={activeSess.status}
-          />
-        )}
-        <span className="flex-1" />
-        <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}>
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <path d="M2 4.5h12M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M4 4.5l.7 8a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button type="button" title="重启当前终端" onClick={() => void (async () => {
-          if (!activeSess) return;
-          await killSession(activeSess.id);
-          await newSession();
-        })()} className={iconBtn}>
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Tab 行：每个会话一个 chip；激活态高亮 */}
-      {sessions.length > 0 && (
-        <div className="flex h-7 shrink-0 items-center gap-1 overflow-x-auto border-b border-white/10 px-1">
+    <div className="flex min-h-0 flex-1 flex-col bg-[#1e1e22] text-[#d4d4d4]">
+      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-white/10 px-2">
+        <span className="px-2 text-[0.6875rem] font-semibold tracking-wide text-[#b8b8bd]">TERMINAL</span>
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="终端">
           {sessions.map((s) => {
             const isActive = s.id === activeId;
             return (
-              <button
+              <div
                 key={s.id}
-                type="button"
-                onClick={() => switchSession(s.id)}
                 className={cn(
-                  "group inline-flex shrink-0 items-center gap-1.5 rounded-t-sm px-2 py-1 text-[0.6875rem] transition-colors",
-                  isActive
-                    ? "bg-white/10 text-[#e7e7e7]"
-                    : "text-[#cccccc]/60 hover:bg-white/5 hover:text-[#cccccc]",
+                  "group inline-flex h-8 shrink-0 items-center rounded-[6px] text-[0.8125rem] transition-colors",
+                  isActive ? "bg-[#2d2d32] text-white" : "text-[#aaaab0] hover:bg-white/5 hover:text-[#e7e7e7]",
                 )}
                 title={s.shellFile ? `${s.name} · ${s.shellFile}` : s.id}
               >
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full shrink-0",
-                    s.status === "running" ? "bg-[#0dbc79]" : "bg-[#666]",
-                  )}
-                />
-                {/* 终端图标 */}
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="shrink-0">
-                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.2" />
-                  <path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span className="max-w-28 truncate">{s.name}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  title="关闭"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void killSession(s.id);
-                  }}
-                  className="hidden shrink-0 text-[#cccccc]/60 hover:text-danger group-hover:block"
-                >
-                  ✕
-                </span>
-              </button>
+                <button type="button" role="tab" aria-selected={isActive} onClick={() => switchSession(s.id)} className="inline-flex h-full items-center gap-2 pl-2.5 focus-visible:outline-none">
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", s.status === "running" ? "bg-[#23d18b]" : "bg-[#717178]")} />
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <span className="max-w-44 truncate">{s.name}</span>
+                </button>
+                <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1.5 hidden h-6 w-6 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] hover:bg-white/10 hover:text-white group-hover:flex focus:flex focus-visible:outline-none">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
+                </button>
+              </div>
             );
           })}
-          {runningCount === 0 && sessions.length > 0 && (
-            <span className="ml-2 text-[0.625rem] text-[#cccccc]/40">所有会话已退出</span>
+          {backend === "pty" && (
+            <div className="relative shrink-0">
+              <button type="button" title={`新建终端（${defaultShell?.label ?? "系统 shell"}）`} onClick={() => void newSession()} className={iconBtn}>
+                <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M8 2.5v11M2.5 8h11" strokeLinecap="round" /></svg>
+              </button>
+              {shells.length > 1 && <button type="button" title="选择 shell" onClick={() => setMenuOpen((v) => !v)} className="absolute -right-1 top-1/2 flex h-4 w-3 -translate-y-1/2 items-center justify-center text-[#aaaab0] hover:text-white"><svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
+              {menuOpen && <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute left-0 top-full z-20 mt-1 min-w-48 overflow-hidden rounded-[5px] border border-white/10 bg-[#252526] py-1 shadow-xl">
+                  {shells.map((sh) => <button key={sh.file} type="button" onClick={() => { setMenuOpen(false); void newSession(sh.file); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[#d4d4d4] hover:bg-[#094771]"><span>{sh.label}</span><span className="ml-auto max-w-28 truncate text-[#999]">{sh.file}</span></button>)}
+                </div>
+              </>}
+            </div>
           )}
         </div>
-      )}
+        <div className="ml-1 flex shrink-0 items-center border-l border-white/10 pl-1">
+          {backend === "pipe" && <span className="px-1 text-[0.625rem] text-[#8f8f95]">管道模式</span>}
+          <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M3 4h10M5.5 4V2.5h5V4M5 6l.6 7h4.8l.6-7" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+          <button type="button" title="重启当前终端" onClick={() => void (async () => { if (!activeSess) return; await killSession(activeSess.id); await newSession(); })()} className={iconBtn}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+        </div>
+      </div>
 
-      {/* xterm 挂载点 */}
-      <div ref={containerRef} className="min-h-0 flex-1 px-2 py-1" />
+      <div ref={containerRef} className="min-h-0 flex-1 px-3 py-2" />
     </div>
   );
 }

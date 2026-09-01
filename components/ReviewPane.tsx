@@ -14,7 +14,7 @@ type Checkpoint = { hash: string; time: string; subject: string; checkpoint: boo
  * 文件列表（+/- 统计）→ 点击进入逐文件 diff；非 git 仓库降级提示。
  * 顶部检查点条（P1-9）：列出快照 commit，支持一键回滚（二次确认）。
  */
-export default function ReviewPane({ editedPaths = [] }: { editedPaths?: string[] }) {
+export default function ReviewPane({ editedPaths = [], sessionId }: { editedPaths?: string[]; sessionId?: string | null }) {
   const [data, setData] = useState<GitDiff | null>(null);
   const [selected, setSelected] = useState<DiffFile | null>(null);
   const [fileDiff, setFileDiff] = useState<string>("");
@@ -25,24 +25,24 @@ export default function ReviewPane({ editedPaths = [] }: { editedPaths?: string[
 
   const refreshCps = useCallback(async () => {
     try {
-      const r = await client.checkpoints();
+      const r = await client.checkpoints(sessionId);
       setCheckpoints(r.points.filter((p) => p.checkpoint));
     } catch {
       setCheckpoints([]);
     }
-  }, []);
+  }, [sessionId]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setSelected(null);
     try {
-      setData(await client.gitDiff());
+      setData(await client.gitDiff(undefined, sessionId));
     } catch {
       setData({ available: false, files: [], diff: "" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     void refresh();
@@ -53,12 +53,12 @@ export default function ReviewPane({ editedPaths = [] }: { editedPaths?: string[
     setSelected(f);
     setFileDiff("");
     try {
-      const d = await client.gitDiff(f.path);
+      const d = await client.gitDiff(f.path, sessionId);
       setFileDiff(d.diff || "（该文件无未暂存 diff，可能是新文件或已暂存）");
     } catch (err) {
       setFileDiff(`读取失败：${err instanceof Error ? err.message : "未知错误"}`);
     }
-  }, []);
+  }, [sessionId]);
 
   if (loading && !data) {
     return <div className="p-4 text-xs text-ink-3">读取变更中…</div>;
@@ -150,7 +150,7 @@ export default function ReviewPane({ editedPaths = [] }: { editedPaths?: string[
                   if (!window.confirm(`硬回滚到 ${cp.hash.slice(0, 7)}？之后的所有提交与未跟踪文件将被丢弃。`)) return;
                   setRestoring(true);
                   void client
-                    .checkpointRestore(cp.hash)
+                    .checkpointRestore(cp.hash, sessionId)
                     .then(() => {
                       setCpsOpen(false);
                       return refresh();

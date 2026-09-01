@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveWithinWorkspace } from "@/lib/paths";
+import { workspaceRootForSession } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   const rel = request.nextUrl.searchParams.get("path");
   if (!rel) return NextResponse.json({ error: "缺少 path 参数" }, { status: 400 });
   try {
-    const abs = resolveWithinWorkspace(rel);
+    const abs = resolveWithinWorkspace(rel, workspaceRootForSession(request.nextUrl.searchParams.get("sessionId")));
     const st = await stat(abs);
     if (st.isDirectory()) return NextResponse.json({ error: "目标是目录" }, { status: 400 });
     if (st.size > MAX_BYTES) {
@@ -34,13 +35,13 @@ export async function GET(request: NextRequest) {
 
 /** PUT /api/fs/file — 编辑器保存回写（工作区内，限制同 GET）。 */
 export async function PUT(request: NextRequest) {
-  const body = (await request.json().catch(() => null)) as { path?: string; content?: string } | null;
+  const body = (await request.json().catch(() => null)) as { path?: string; content?: string; sessionId?: string } | null;
   const rel = body?.path;
   if (!rel || typeof body?.content !== "string") {
     return NextResponse.json({ error: "缺少 path 或 content 参数" }, { status: 400 });
   }
   try {
-    const abs = resolveWithinWorkspace(rel);
+    const abs = resolveWithinWorkspace(rel, workspaceRootForSession(body.sessionId));
     if (Buffer.byteLength(body.content, "utf8") > MAX_BYTES) {
       return NextResponse.json({ error: "内容超过 512KB 限制" }, { status: 400 });
     }

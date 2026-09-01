@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 
 import { resolveWithinWorkspace } from "@/lib/paths";
+import { workspaceRootForSession } from "@/lib/runtime";
 
 const run = promisify(execFile);
 
@@ -18,8 +19,9 @@ const MAX_DIFF = 200_000;
 /** 工作区未提交变更的 diff（产物侧「审查」Tab 数据源）。
  *  只读白名单：git diff HEAD（tracked 变更）；非 git 仓库降级 available:false。 */
 export async function GET(request: Request) {
-  const cwd = resolveWithinWorkspace(null);
-  const context = new URL(request.url).searchParams.get("path") ?? "";
+  const search = new URL(request.url).searchParams;
+  const cwd = resolveWithinWorkspace(null, workspaceRootForSession(search.get("sessionId")));
+  const context = search.get("path") ?? "";
   try {
     const { stdout: numstat } = await run("git", ["diff", "HEAD", "--numstat"], { cwd, maxBuffer: 10 << 20 });
     const files: DiffFile[] = [];
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
     let truncated = false;
     if (context) {
       // 指定文件时返回该文件完整 diff（审查面板逐文件查看）
-      const safePath = resolveWithinWorkspace(context).slice(cwd.length + 1);
+      const safePath = resolveWithinWorkspace(context, cwd).slice(cwd.length + 1);
       const { stdout } = await run("git", ["diff", "HEAD", "--", safePath], { cwd, maxBuffer: 10 << 20 });
       diff = stdout;
     } else {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveWithinWorkspace } from "@/lib/paths";
+import { workspaceRootForSession } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,8 +19,9 @@ export type TreeNode = {
 /** GET /api/fs/tree?path=src/lib — 列出工作区内某目录一层内容（懒加载目录树） */
 export async function GET(request: NextRequest) {
   const dir = request.nextUrl.searchParams.get("path") ?? "";
+  const root = workspaceRootForSession(request.nextUrl.searchParams.get("sessionId"));
   try {
-    const abs = resolveWithinWorkspace(dir);
+    const abs = resolveWithinWorkspace(dir, root);
     const entries = await readdir(abs, { withFileTypes: true });
     const nodes: TreeNode[] = [];
     for (const e of entries) {

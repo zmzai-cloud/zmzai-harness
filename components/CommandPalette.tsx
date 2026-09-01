@@ -27,12 +27,14 @@ export default function CommandPalette({
   onOpenFile,
   onSelectSession,
   onClose,
+  sessionId,
 }: {
   mode: PaletteMode;
   commands: Command[];
   onOpenFile: (path: string, line?: number) => void;
   onSelectSession: (id: string) => void;
   onClose: () => void;
+  sessionId?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -49,12 +51,12 @@ export default function CommandPalette({
     if (mode !== "files") return;
     const t = setTimeout(() => {
       void client
-        .fsSearch(query.trim())
+        .fsSearch(query.trim(), sessionId)
         .then((r) => setFileHits(r.results.filter((x) => x.type === "file")))
         .catch(() => setFileHits([]));
     }, 180);
     return () => clearTimeout(t);
-  }, [query, mode]);
+  }, [query, mode, sessionId]);
 
   // 全文搜索模式：输入防抖搜索（服务端遍历转录，防抖给长一点）
   useEffect(() => {

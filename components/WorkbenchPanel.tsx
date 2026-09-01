@@ -6,13 +6,11 @@ import { cn } from "@zmzai/theme";
 import { client } from "@/lib/client";
 import CanvasPane from "./CanvasPane";
 import FileEditor from "./FileEditor";
-import MapPane from "./MapPane";
 import FileTree from "./FileTree";
 import ReviewPane from "./ReviewPane";
-import TerminalPane from "./TerminalPane";
 
 /** 顶部 tab：终端不再单独占位，常驻底部面板。 */
-type Tab = "review" | "files" | "canvas" | "map";
+type Tab = "review" | "files" | "preview";
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   {
@@ -36,22 +34,12 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    key: "canvas",
-    label: "画布",
+    key: "preview",
+    label: "成果预览",
     icon: (
       <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
         <rect x="1.5" y="2.5" width="13" height="10" rx="1.2" />
         <path d="M5.5 15h5M8 12.5V15" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    key: "map",
-    label: "地图",
-    icon: (
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <path d="M2 3.5l4-1.5 4 1.5 4-1.5v10.5l-4 1.5-4-1.5-4 1.5V3.5z" strokeLinejoin="round" />
-        <path d="M6 2v10.5M10 3.5V14" />
       </svg>
     ),
   },
@@ -61,53 +49,6 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
 type FileTab = { path: string; content: string; size: number };
 
 const MAX_FILE_TABS = 8;
-
-/** 上下分割拖拽条：拖动时实时改 height，松手即持久化（下游 useEffect 落 localStorage）。 */
-function SplitHandle({
-  onChange,
-  min,
-}: {
-  onChange: (r: number) => void;
-  min?: number; // px，下半面板的最小高度
-}) {
-  const startRef = useRef<{ y: number; ratio: number; containerH: number } | null>(null);
-  const onMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const container = (e.currentTarget as HTMLElement).parentElement;
-    const rect = container?.getBoundingClientRect();
-    if (!rect) return;
-    // 从 ref 拿当前 ratio；这里只用于记录起点，比从闭包外读更稳
-    const startRatio = startRef.current?.ratio ?? 0.45;
-    startRef.current = { y: e.clientY, ratio: startRatio, containerH: rect.height };
-    const onMove = (e: MouseEvent) => {
-      const start = startRef.current;
-      if (!start) return;
-      const dy = e.clientY - start.y;
-      const next = start.ratio - dy / start.containerH;
-      const lower = min ? min / start.containerH : 0.15;
-      const upper = 0.85;
-      const clamped = Math.min(upper, Math.max(lower, next));
-      // 把最新值写回 ref（用于下次 mouseDown 起点）
-      startRef.current = { ...start, ratio: clamped };
-      onChange(clamped);
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      startRef.current = null;
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-  return (
-    <div
-      role="separator"
-      aria-orientation="horizontal"
-      onMouseDown={onMouseDown}
-      className="h-1 shrink-0 cursor-row-resize border-y border-line transition-colors hover:bg-selected-strong"
-    />
-  );
-}
 
 /** 带行号的纯文本预览（F3：path:line 锚点滚动定位）。 */
 function NumberedPreview({ content, anchorLine }: { content: string; anchorLine?: number }) {
@@ -133,7 +74,6 @@ function NumberedPreview({ content, anchorLine }: { content: string; anchorLine?
   );
 }
 
-const TERMINAL_RATIO_KEY = "lectern:terminal-panel-ratio";
 const FILE_TREE_WIDTH_KEY = "lectern:file-tree-width";
 
 /**
@@ -141,9 +81,7 @@ const FILE_TREE_WIDTH_KEY = "lectern:file-tree-width";
  *  ┌──────────────────────────────────────────────┐
  *  │ 顶部 tab：[审查][文件][画布][地图]             │
  *  ├──────────┬───────────────────────────────────┤
- *  │ FileTree │   内容区（preview/review/canvas/map）│
- *  │  (左)    ├───────────────────────────────────┤
- *  │          │   终端（多 zsh tab，常驻）          │
+ *  │ FileTree │   内容区（preview/review/results） │
  *  └──────────┴───────────────────────────────────┘
  * 「画布打开」把文件 Tab 的 HTML 产物送进画布 Tab；openRequest 是外部联动
  * （消息内路径点击 / ⌘P 文件快开 / 工具卡路径）请求打开某个文件（可带行号）。
@@ -151,36 +89,20 @@ const FILE_TREE_WIDTH_KEY = "lectern:file-tree-width";
 export default function WorkbenchPanel({
   openRequest,
   editedPaths,
+  sessionId,
 }: {
   openRequest?: { path: string; ts: number; line?: number } | null;
   /** 本轮 Agent 触碰过的文件（file.edited 投影，最新在前）——文件 Tab 顶部 chips + Git 高亮。 */
   editedPaths?: string[];
+  sessionId?: string | null;
 }) {
   const [tab, setTab] = useState<Tab>("review");
   const [fileTabs, setFileTabs] = useState<FileTab[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [canvasPath, setCanvasPath] = useState<string | null>(null);
+  const userSelectedTab = useRef(false);
   const loadSeq = useRef(0);
-
-  // 上下面板比例（下半 = terminal 占比）；localStorage 记忆
-  const [terminalRatio, setTerminalRatio] = useState<number>(() => {
-    if (typeof window === "undefined") return 0.45;
-    try {
-      const v = window.localStorage.getItem(TERMINAL_RATIO_KEY);
-      const n = v ? parseFloat(v) : NaN;
-      return Number.isFinite(n) && n > 0.1 && n < 0.9 ? n : 0.45;
-    } catch {
-      return 0.45;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TERMINAL_RATIO_KEY, String(terminalRatio));
-    } catch {
-      /* 忽略 */
-    }
-  }, [terminalRatio]);
 
   // 文件树列宽（VSCode 默认 ~240）
   const [treeWidth, setTreeWidth] = useState<number>(() => {
@@ -231,7 +153,7 @@ export default function WorkbenchPanel({
     setAnchorLine(line);
     setActivePath(path);
     void client
-      .fsFile(path)
+      .fsFile(path, sessionId)
       .then((f) => {
         if (seq !== loadSeq.current) return;
         setFileTabs((prev) => {
@@ -252,7 +174,14 @@ export default function WorkbenchPanel({
           return next.slice(0, MAX_FILE_TABS);
         });
       });
-  }, []);
+  }, [sessionId]);
+
+  useEffect(() => {
+    const latestPreview = editedPaths?.find((path) => /\.html?$/i.test(path));
+    if (!latestPreview || userSelectedTab.current) return;
+    setCanvasPath(latestPreview);
+    setTab("preview");
+  }, [editedPaths]);
 
   useEffect(() => {
     if (!openRequest) return;
@@ -269,6 +198,7 @@ export default function WorkbenchPanel({
   };
 
   const select = (t: Tab) => {
+    userSelectedTab.current = true;
     setTab(t);
     setEditing(false);
   };
@@ -335,7 +265,7 @@ export default function WorkbenchPanel({
                     type="button"
                     onClick={() => {
                       setCanvasPath(activeFile.path);
-                      select("canvas");
+                      select("preview");
                     }}
                     className="shrink-0 rounded-pill bg-surface-2 px-2 py-0.5 text-[0.625rem] font-medium text-ink-2 transition-colors hover:text-ink"
                   >
@@ -389,11 +319,9 @@ export default function WorkbenchPanel({
             </div>
           );
         case "review":
-          return <ReviewPane editedPaths={editedPaths ?? []} />;
-        case "canvas":
-          return <CanvasPane path={canvasPath} onPathChange={setCanvasPath} />;
-        case "map":
-          return <MapPane />;
+          return <ReviewPane editedPaths={editedPaths ?? []} sessionId={sessionId} />;
+        case "preview":
+          return <CanvasPane path={canvasPath} onPathChange={setCanvasPath} sessionId={sessionId} />;
       }
   };
 
@@ -417,10 +345,7 @@ export default function WorkbenchPanel({
         ))}
       </div>
 
-      {/* 上半：左侧 tree + 右侧预览/审查/画布/地图；下半：多 zsh 终端。
-          flex 列布局：top flex:1 1 0% 占满，handle 固定 4px，bottom 按 ratio 固定 calc。 */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0" style={{ flex: "1 1 0%" }}>
+      <div className="flex min-h-0 flex-1">
           {/* 左侧文件树（VSCode 风格 explorer，仅文件 tab 显示；其他 tab 让出全部宽度） */}
           {tab === "files" && (
             <>
@@ -430,7 +355,7 @@ export default function WorkbenchPanel({
                   <span>资源管理器</span>
                   <span className="ml-auto text-[0.625rem] normal-case tracking-normal text-ink-3">↻</span>
                 </div>
-                <FileTree onOpenFile={(path) => openFile(path)} />
+                <FileTree onOpenFile={(path) => openFile(path)} sessionId={sessionId} />
               </div>
               {/* 文件树 ↔ 预览拖拽条 */}
               <div
@@ -445,18 +370,6 @@ export default function WorkbenchPanel({
           <div className="flex min-h-0 flex-1 flex-col">
             {renderPreview()}
           </div>
-        </div>
-
-        {/* 上下拖拽条 */}
-        <SplitHandle onChange={setTerminalRatio} min={120} />
-
-        {/* 下半：终端（多 zsh tab，常驻） */}
-        <div
-          className="flex min-h-0"
-          style={{ flex: `0 0 calc(${terminalRatio * 100}% - 4px)`, minHeight: 120 }}
-        >
-          <TerminalPane />
-        </div>
       </div>
     </div>
   );

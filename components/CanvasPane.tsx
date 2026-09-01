@@ -9,13 +9,14 @@ type Props = {
   /** 要在画布中打开的工作区文件路径（相对工作区根）。 */
   path: string | null;
   onPathChange: (path: string) => void;
+  sessionId?: string | null;
 };
 
 /**
  * 画布 Tab：把工作区生成的 HTML 产物在 iframe（srcDoc）中实时渲染。
  * HTML 用 srcDoc 隔离渲染（不落临时路由）；其余文本文件回退为代码预览。
  */
-export default function CanvasPane({ path, onPathChange }: Props) {
+export default function CanvasPane({ path, onPathChange, sessionId }: Props) {
   const [draft, setDraft] = useState(path ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +31,7 @@ export default function CanvasPane({ path, onPathChange }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const f = await client.fsFile(p.trim());
+      const f = await client.fsFile(p.trim(), sessionId);
       setContent(f.content);
       onPathChange(f.path);
     } catch (err) {
@@ -39,9 +40,13 @@ export default function CanvasPane({ path, onPathChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [onPathChange]);
+  }, [onPathChange, sessionId]);
 
   const isHtml = (path ?? "").toLowerCase().endsWith(".html") || (path ?? "").toLowerCase().endsWith(".htm");
+
+  useEffect(() => {
+    if (path) void open(path);
+  }, [open, path]);
 
   if (!path) {
     return (
@@ -51,9 +56,9 @@ export default function CanvasPane({ path, onPathChange }: Props) {
           <path d="M2.5 8.5h19M6 6.2h.01M8.5 6.2h.01" strokeLinecap="round" />
           <path d="M9 13l-2 2 2 2M15 13l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <div className="text-sm font-semibold text-ink-2">画布</div>
+        <div className="text-sm font-semibold text-ink-2">成果预览</div>
         <div className="max-w-60 text-xs leading-5 text-ink-3">
-          输入工作区内 HTML 产物路径（如 public/demo/index.html），或从「文件」Tab 点击「画布打开」。
+          当前任务生成 HTML 成果后会自动显示在这里；也可从「文件」中手动打开一个 HTML 文件。
         </div>
         <div className="flex w-full max-w-72 items-center gap-2">
           <input

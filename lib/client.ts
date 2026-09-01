@@ -121,33 +121,38 @@ export const client = {
 
   // ===== Inspector =====
 
-  fsTree: (path: string) =>
-    fetch(`/api/fs/tree?path=${encodeURIComponent(path)}`).then((r) =>
+  fsTree: (path: string, sessionId?: string | null) =>
+    fetch(`/api/fs/tree?path=${encodeURIComponent(path)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
       j<{ path: string; nodes: TreeNode[] }>(r),
     ),
 
-  fsFile: (path: string) =>
-    fetch(`/api/fs/file?path=${encodeURIComponent(path)}`).then((r) =>
+  fsFile: (path: string, sessionId?: string | null) =>
+    fetch(`/api/fs/file?path=${encodeURIComponent(path)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
       j<{ path: string; size: number; content: string }>(r),
     ),
 
-  fsSave: (path: string, content: string) =>
-    send("PUT", "/api/fs/file", { path, content }).then((r) => j<{ ok: boolean; size: number }>(r)),
+  fsSave: (path: string, content: string, sessionId?: string | null) =>
+    send("PUT", "/api/fs/file", { path, content, sessionId }).then((r) => j<{ ok: boolean; size: number }>(r)),
 
-  fsSearch: (q: string) =>
-    fetch(`/api/fs/search?q=${encodeURIComponent(q)}`).then((r) =>
+  fsSearch: (q: string, sessionId?: string | null) =>
+    fetch(`/api/fs/search?q=${encodeURIComponent(q)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
       j<{ query: string; results: { path: string; type: "dir" | "file" }[] }>(r),
     ),
 
   gitStatus: () => fetch("/api/git/status").then((r) => j<GitStatus>(r)),
 
-  terminalList: () => fetch("/api/terminal").then((r) => j<TerminalListResult>(r)),
+  terminalList: (sessionId?: string | null) => fetch(`/api/terminal${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) => j<TerminalListResult>(r)),
 
-  terminalStart: (command: string) => post("/api/terminal", { command }).then((r) => j<TerminalSession>(r)),
+  terminalStart: (command: string, sessionId?: string | null) => post("/api/terminal", { command, sessionId }).then((r) => j<TerminalSession>(r)),
 
   /** 起一条交互式 shell 会话；不传 shell 时跟随系统默认（zsh/bash/fish/pwsh…）。 */
-  terminalStartShell: (shell?: string) =>
-    post("/api/terminal", { interactive: true, ...(shell ? { shell } : {}) }).then(
+  terminalStartShell: (shell?: string, sessionId?: string | null, size?: { cols: number; rows: number }) =>
+    post("/api/terminal", {
+      interactive: true,
+      ...(shell ? { shell } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(size ?? {}),
+    }).then(
       (r) => j<TerminalSession>(r),
     ),
 
@@ -156,6 +161,8 @@ export const client = {
 
   terminalInput: (id: string, data: string) =>
     post(`/api/terminal/${id}/input`, { data }).then((r) => j<{ ok: boolean }>(r)),
+  terminalResize: (id: string, cols: number, rows: number) =>
+    post(`/api/terminal/${id}/resize`, { cols, rows }).then((r) => j<{ ok: boolean }>(r)),
 
   terminalKill: (id: string) =>
     fetch(`/api/terminal/${id}`, { method: "DELETE" }).then((r) => j<{ ok: boolean }>(r)),
@@ -178,19 +185,23 @@ export const client = {
   compact: (sessionId: string) =>
     post(`/api/sessions/${sessionId}/compact`).then((r) => j<{ ok: boolean; reason?: string }>(r)),
 
-  gitDiff: (path?: string) =>
-    fetch(`/api/git/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`).then((r) => j<GitDiff>(r)),
+  gitDiff: (path?: string, sessionId?: string | null) => {
+    const query = new URLSearchParams();
+    if (path) query.set("path", path);
+    if (sessionId) query.set("sessionId", sessionId);
+    return fetch(`/api/git/diff${query.size ? `?${query}` : ""}`).then((r) => j<GitDiff>(r));
+  },
 
-  checkpoints: () =>
-    fetch("/api/git/checkpoint").then((r) =>
+  checkpoints: (sessionId?: string | null) =>
+    fetch(`/api/git/checkpoint${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
       j<{ points: { hash: string; time: string; subject: string; checkpoint: boolean }[] }>(r),
     ),
 
-  checkpointCreate: (label: string) =>
-    post("/api/git/checkpoint", { label }).then((r) => j<{ ok: boolean; skipped?: boolean; reason?: string; hash?: string }>(r)),
+  checkpointCreate: (label: string, sessionId?: string | null) =>
+    post("/api/git/checkpoint", { label, sessionId }).then((r) => j<{ ok: boolean; skipped?: boolean; reason?: string; hash?: string }>(r)),
 
-  checkpointRestore: (hash: string) =>
-    send("PUT", "/api/git/checkpoint", { hash }).then((r) => j<{ ok: boolean }>(r)),
+  checkpointRestore: (hash: string, sessionId?: string | null) =>
+    send("PUT", "/api/git/checkpoint", { hash, sessionId }).then((r) => j<{ ok: boolean }>(r)),
 
   keyStatus: () => fetch("/api/settings/key").then((r) => j<KeyStatus>(r)),
 
@@ -291,4 +302,3 @@ export const client = {
     };
   },
 };
-

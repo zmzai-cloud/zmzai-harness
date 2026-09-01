@@ -9,10 +9,11 @@ import type { TreeNode } from "@/lib/types";
 type Props = {
   /** 选中文件预览回调（Inspector 上层渲染内容） */
   onOpenFile: (path: string) => void;
+  sessionId?: string | null;
 };
 
 /** 懒加载目录树：展开目录时按需拉一层内容，适合中型工作区。 */
-export default function FileTree({ onOpenFile }: Props) {
+export default function FileTree({ onOpenFile, sessionId }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Map<string, TreeNode[]>>(new Map());
   const [loading, setLoading] = useState<Set<string>>(new Set());
@@ -20,7 +21,7 @@ export default function FileTree({ onOpenFile }: Props) {
   const load = useCallback(async (path: string) => {
     setLoading((prev) => new Set(prev).add(path));
     try {
-      const { nodes } = await client.fsTree(path);
+      const { nodes } = await client.fsTree(path, sessionId);
       setChildren((prev) => new Map(prev).set(path, nodes));
     } catch {
       setChildren((prev) => new Map(prev).set(path, []));
@@ -31,7 +32,7 @@ export default function FileTree({ onOpenFile }: Props) {
         return next;
       });
     }
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     void load("");

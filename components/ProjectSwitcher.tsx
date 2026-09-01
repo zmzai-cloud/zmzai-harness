@@ -11,7 +11,7 @@ import type { ProjectsState } from "@/lib/types";
  * App 内走系统原生对话框（window.lecternNative.pickFolder）；Web 降级为手动输入路径。
  * 切换后服务端 workspaceRoot 全站跟随（会话/文件/Git/终端换库），页面整体重载。
  */
-export default function ProjectSwitcher() {
+export default function ProjectSwitcher({ onCollapseSidebar }: { onCollapseSidebar?: () => void }) {
   const [state, setState] = useState<ProjectsState | null>(null);
   const [open, setOpen] = useState(false);
   const [manual, setManual] = useState("");
@@ -85,10 +85,11 @@ export default function ProjectSwitcher() {
 
   return (
     <div ref={rootRef} className="relative shrink-0 border-b border-line px-3 py-2.5">
+      <div className="flex items-center gap-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-surface-2"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-surface-2"
         title={active?.path}
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" className="shrink-0 text-ink-3">
@@ -110,6 +111,21 @@ export default function ProjectSwitcher() {
           <path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
+      {onCollapseSidebar && (
+        <button
+          type="button"
+          onClick={onCollapseSidebar}
+          title="收起会话栏"
+          aria-label="收起会话栏"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1.2" />
+            <path d="M6 2.5v11M10 5 7 8l3 3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+      </div>
 
       {open && (
         <div className="absolute left-3 right-3 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">

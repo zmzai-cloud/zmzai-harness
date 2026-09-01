@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar, navItemClass } from "@zmzai/theme";
 
@@ -9,11 +9,12 @@ import ProjectSwitcher from "@/components/ProjectSwitcher";
 import SessionList from "@/components/SessionList";
 import ChatView from "@/components/ChatView";
 import WorkbenchPanel from "@/components/WorkbenchPanel";
+import TerminalPane from "@/components/TerminalPane";
 import AccountBlock from "@/components/AccountBlock";
 import { client, type ConnectionState } from "@/lib/client";
 import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
 import { readPref, writePref, clearPref } from "@/lib/prefs";
-import type { SessionInfo, SessionListItem, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation, Project } from "@/lib/types";
+import type { SessionInfo, SessionListItem, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
 function statusLabel(status: string): string {
@@ -29,6 +30,98 @@ function statusLabel(status: string): string {
   }
 }
 
+function readWidth(key: string, fallback: number, min: number, max: number): number {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (raw == null) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function VerticalSplitter({ label, value, min, max, direction, onChange }: { label: string; value: number; min: number; max: number; direction: 1 | -1; onChange: (value: number) => void }) {
+  const drag = useRef<{ id: number; x: number; value: number } | null>(null);
+  const apply = useCallback((next: number) => onChange(Math.min(max, Math.max(min, next))), [max, min, onChange]);
+
+  // Electron 有时不会把 pointer capture 后的 move 回送到 React 合成事件；
+  // 由 window 接管拖动，离开 12px 热区后也能稳定继续调整。
+  useEffect(() => {
+    const move = (event: globalThis.PointerEvent) => {
+      const start = drag.current;
+      if (start?.id === event.pointerId) apply(start.value + direction * (event.clientX - start.x));
+    };
+    const finish = (event: globalThis.PointerEvent) => {
+      if (drag.current?.id !== event.pointerId) return;
+      drag.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [apply, direction]);
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    drag.current = { id: event.pointerId, x: event.clientX, value };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+  return <div role="separator" aria-orientation="vertical" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} onPointerDown={onPointerDown} onKeyDown={(event) => {
+    if (event.key === "ArrowLeft") { event.preventDefault(); apply(value - direction * 16); }
+    if (event.key === "ArrowRight") { event.preventDefault(); apply(value + direction * 16); }
+    if (event.key === "Home") { event.preventDefault(); apply(min); }
+    if (event.key === "End") { event.preventDefault(); apply(max); }
+  }} className="group relative hidden w-3 shrink-0 cursor-col-resize touch-none outline-none min-[760px]:block">
+    <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-all group-hover:w-1 group-hover:bg-selected-strong group-focus:w-1 group-focus:bg-selected-strong" />
+  </div>;
+}
+
+function HorizontalSplitter({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+  const drag = useRef<{ id: number; y: number; value: number } | null>(null);
+  const apply = useCallback((next: number) => onChange(Math.min(max, Math.max(min, next))), [max, min, onChange]);
+  useEffect(() => {
+    const move = (event: globalThis.PointerEvent) => {
+      const start = drag.current;
+      if (start?.id === event.pointerId) apply(start.value - (event.clientY - start.y));
+    };
+    const finish = (event: globalThis.PointerEvent) => {
+      if (drag.current?.id !== event.pointerId) return;
+      drag.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [apply]);
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    drag.current = { id: event.pointerId, y: event.clientY, value };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  };
+  return <div role="separator" aria-orientation="horizontal" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} onPointerDown={onPointerDown} onKeyDown={(event) => {
+    if (event.key === "ArrowUp") { event.preventDefault(); apply(value + 16); }
+    if (event.key === "ArrowDown") { event.preventDefault(); apply(value - 16); }
+    if (event.key === "Home") { event.preventDefault(); apply(min); }
+    if (event.key === "End") { event.preventDefault(); apply(max); }
+  }} className="group relative h-3 shrink-0 cursor-row-resize touch-none outline-none">
+    <span className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-line transition-all group-hover:h-1 group-hover:bg-selected-strong group-focus:h-1 group-focus:bg-selected-strong" />
+  </div>;
+}
+
 /** 把最新回调同步进 ref 桥（避免命令面板捕获旧闭包）。 */
 function PaletteBridge({ bridge, action }: { bridge: React.RefObject<{ newSession: () => void }>; action: () => void }) {
   useEffect(() => {
@@ -41,8 +134,6 @@ export default function App() {
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  // 跨项目会话列表（P1）：当前项目条目（点击归属其它项目的会话 → 切项目 + 恢复会话）
-  const [activeProject, setActiveProject] = useState<Project | null>(null);
   // 侧栏已去代理分组：会话固定用 default agent，模型选择交给底部 Composer（默认推荐）
   const activeAgent = "default";
   // 消息流投影：事件不再累积进 state（无限增长 + 每 delta 全量重投影 O(n²)），
@@ -71,6 +162,13 @@ export default function App() {
   const paletteActionsRef = useRef<{ newSession: () => void }>({ newSession: () => undefined });
   // 左侧栏收起/展开（Qoder 同款，持久化）
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(() => readWidth("lectern:sidebar-width", 256, 200, 420));
+  const [workbenchWidth, setWorkbenchWidth] = useState(() => readWidth("lectern:workbench-width", 384, 320, 720));
+  const [workbenchOpen, setWorkbenchOpen] = useState(() => typeof window === "undefined" || window.localStorage.getItem("lectern:workbench-open") !== "0");
+  const [viewportWidth, setViewportWidth] = useState(() => typeof window === "undefined" ? 1440 : window.innerWidth);
+  const [viewportHeight, setViewportHeight] = useState(() => typeof window === "undefined" ? 900 : window.innerHeight);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(() => readWidth("lectern:bottom-panel-height", 260, 160, 640));
+  const [bottomPanelOpen, setBottomPanelOpen] = useState(() => typeof window === "undefined" || window.localStorage.getItem("lectern:bottom-panel-open") !== "0");
   // 会话级 worktree 隔离（robustness-plan §9）：新建会话默认勾选「隔离副本」（持久化）
   const [isolateNew, setIsolateNew] = useState(false);
   // active 会话的隔离状态（切换会话时按服务端为准查询）+ 操作结果横幅
@@ -93,8 +191,34 @@ export default function App() {
 
   useEffect(() => {
     void client.authStatus().then(setAuth);
-    void client.listProjects().then((s) => setActiveProject(s.active)).catch(() => undefined);
   }, []);
+  useEffect(() => { window.localStorage.setItem("lectern:sidebar-width", String(sidebarWidth)); }, [sidebarWidth]);
+  useEffect(() => { window.localStorage.setItem("lectern:workbench-width", String(workbenchWidth)); }, [workbenchWidth]);
+  useEffect(() => { window.localStorage.setItem("lectern:workbench-open", workbenchOpen ? "1" : "0"); }, [workbenchOpen]);
+  useEffect(() => { window.localStorage.setItem("lectern:bottom-panel-height", String(bottomPanelHeight)); }, [bottomPanelHeight]);
+  useEffect(() => { window.localStorage.setItem("lectern:bottom-panel-open", bottomPanelOpen ? "1" : "0"); }, [bottomPanelOpen]);
+  useEffect(() => {
+    const syncViewport = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
+    window.addEventListener("resize", syncViewport);
+    return () => window.removeEventListener("resize", syncViewport);
+  }, []);
+
+  // 两侧宽度不会挤掉中间的可读对话区；窄屏由既有断点隐藏右栏。
+  const sidebarMax = Math.max(200, Math.min(420, viewportWidth - (workbenchOpen ? workbenchWidth : 0) - 436));
+  const workbenchMax = Math.max(320, Math.min(720, viewportWidth - (sidebarOpen ? sidebarWidth : 0) - 436));
+  const bottomPanelMax = Math.max(160, viewportHeight - 280);
+  useEffect(() => {
+    setSidebarWidth((value) => Math.min(value, sidebarMax));
+  }, [sidebarMax]);
+  useEffect(() => {
+    setWorkbenchWidth((value) => Math.min(value, workbenchMax));
+  }, [workbenchMax]);
+  useEffect(() => {
+    setBottomPanelHeight((value) => Math.min(value, bottomPanelMax));
+  }, [bottomPanelMax]);
 
   // 投影快照的 rAF 批处理：同一帧内任意多条事件只触发一次渲染
   const flushProjection = useCallback(() => {
@@ -123,12 +247,27 @@ export default function App() {
       return !v;
     });
   }, []);
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((value) => {
+      writePref("sidebar", value ? "0" : "1");
+      return !value;
+    });
+  }, []);
+  const toggleBottomPanel = useCallback(() => {
+    setBottomPanelOpen((value) => !value);
+  }, []);
 
   // P2-12 全局快捷键：⌘K 命令 / ⌘P 文件 / ⌘⇧F 全文搜索（输入类元素聚焦时不抢）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
+      // VS Code 对齐：终端/调试区始终可用，输入框聚焦时也不让浏览器吞掉。
+      if (key === "j") {
+        e.preventDefault();
+        toggleBottomPanel();
+        return;
+      }
       if (key !== "k" && key !== "p" && !(key === "f" && e.shiftKey)) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -137,15 +276,13 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [toggleBottomPanel]);
 
   useEffect(() => {
-    void client.listSessions(true).then(setSessions);
+    void client.listSessions().then(setSessions);
   }, [auth?.loggedIn]);
 
-  // P1 会话稳定性：boot 恢复。pendingSession（跨项目跳转目标，switchProject+reload
-  // 前写入）优先——无条件恢复；否则恢复 lastSession（上次活跃会话，仅当前项目
-  // 库里存在时才恢复，防止项目切换后指向失效 id）。
+  // 仅恢复当前项目库中仍存在的上次会话。旧跨项目 pendingSession 不再参与恢复。
   const bootRestoredRef = useRef(false);
   useEffect(() => {
     if (bootRestoredRef.current || !auth?.loggedIn) return;
@@ -155,11 +292,9 @@ export default function App() {
       return;
     }
     bootRestoredRef.current = true;
-    const pending = readPref("pendingSession");
     clearPref("pendingSession");
     const last = readPref("lastSession");
-    if (pending) setActiveId(pending);
-    else if (last && sessions.some((s) => s.id === last)) setActiveId(last);
+    if (last && sessions.some((s) => s.id === last)) setActiveId(last);
   }, [auth?.loggedIn, sessions]);
 
   // lastSession 持久化：活跃会话变化即写（下次启动自动回到上次会话）
@@ -167,25 +302,9 @@ export default function App() {
     if (activeId) writePref("lastSession", activeId);
   }, [activeId]);
 
-  // 会话选择（P1 跨项目）：归属其它项目的会话 → switchProject（全站跟随语义）
-  // + pendingSession 暂存目标 + reload 后由上面的 boot 恢复逻辑选中。
-  const selectSession = useCallback(
-    (id: string) => {
-      if (id === activeId) return;
-      const target = sessions.find((s) => s.id === id);
-      const targetProject = target?.projectId ?? activeProject?.id ?? "default";
-      if (activeProject && targetProject !== activeProject.id) {
-        writePref("pendingSession", id);
-        void client
-          .switchProject(targetProject)
-          .then(() => window.location.reload())
-          .catch(() => clearPref("pendingSession"));
-        return;
-      }
-      setActiveId(id);
-    },
-    [activeId, activeProject, sessions],
-  );
+  const selectSession = useCallback((id: string) => {
+    if (id !== activeId) setActiveId(id);
+  }, [activeId]);
 
   useEffect(() => {
     const projector = projectorRef.current ?? (projectorRef.current = new ChatProjector());
@@ -307,7 +426,7 @@ export default function App() {
     const start = () => {
       clearInterval(timer);
       timer = setInterval(() => {
-        void client.listSessions(true).then(setSessions).catch(() => undefined);
+        void client.listSessions().then(setSessions).catch(() => undefined);
       }, document.hidden ? 60_000 : 10_000);
     };
     const onVis = () => start();
@@ -358,7 +477,7 @@ export default function App() {
       // 乐观回显：发送瞬间显示用户气泡，真实 message.updated 到达后自动让位
       setEcho({ text, images: images ?? [] });
       // P1-9 任务前自动快照（git 仓库且有变更时才落 commit；失败不阻塞发送）
-      void client.checkpointCreate(`任务前快照 · ${text.trim().slice(0, 30) || "图片任务"}`).catch(() => undefined);
+      void client.checkpointCreate(`任务前快照 · ${text.trim().slice(0, 30) || "图片任务"}`, sid).catch(() => undefined);
       // per-prompt 模型/推理力度覆盖：composer 选了则随本条消息下发，否则跟随代理默认
       try {
         await client.prompt(sid, text, activeAgent, selectedModel ?? undefined, images, effort);
@@ -366,8 +485,8 @@ export default function App() {
         setEcho(null); // 发送失败：撤回乐观气泡，错误经其它途径提示
       }
       // prompt 可能排队返回，刷新标题等元数据；AI 摘要标题异步落库，延迟再刷一次
-      void client.listSessions(true).then(setSessions);
-      setTimeout(() => void client.listSessions(true).then(setSessions), 4000);
+      void client.listSessions().then(setSessions);
+      setTimeout(() => void client.listSessions().then(setSessions), 4000);
     },
     [activeId, activeAgent, auth?.loggedIn, selectedModel, isolateNew],
   );
@@ -445,20 +564,25 @@ export default function App() {
           <>
             <button
               type="button"
-              onClick={() =>
-                setSidebarOpen((v) => {
-                  writePref("sidebar", v ? "0" : "1");
-                  return !v;
-                })
-              }
-              title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+              onClick={() => setWorkbenchOpen((value) => !value)}
+              title={workbenchOpen ? "收起右侧工作区" : "展开右侧工作区"}
+              aria-label={workbenchOpen ? "收起右侧工作区" : "展开右侧工作区"}
+              className="hidden h-7 w-7 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong min-[1180px]:inline-flex"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-                <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-                <path d="M6 2.5v11" />
-              </svg>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M10 2.5v11" /><path d={workbenchOpen ? "M6 5l3 3-3 3" : "M10 5 7 8l3 3"} strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
+            {!sidebarOpen && <button
+              type="button"
+              onClick={toggleSidebar}
+              title="展开会话栏"
+              aria-label="展开会话栏"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35">
+                <rect x="1.5" y="2.5" width="13" height="11" rx="1.2" />
+                <path d="M6 2.5v11M6 5l3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>}
           </>
         }
       >
@@ -467,47 +591,63 @@ export default function App() {
       {/* 命令面板的「新建会话」需要拿最新 newSession */}
       <PaletteBridge bridge={paletteActionsRef} action={newSession} />
 
-      {/* 主体：项目/会话侧栏 + 对话 + 产物侧工作台（审查/文件/画布/终端） */}
+      {/* 四区工作台：会话栏 | 对话 | 右侧工作区，底部独立承载终端与后续调试工具。 */}
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
         <SessionList
-          top={<ProjectSwitcher />}
+          top={<ProjectSwitcher onCollapseSidebar={toggleSidebar} />}
           bottom={<AccountBlock />}
           sessions={sessions}
           activeId={activeId}
           onNewSession={() => void newSession()}
           canCreate={!!auth?.loggedIn}
           isolateNew={isolateNew}
+          width={sidebarWidth}
           onToggleIsolateNew={toggleIsolateNew}
           onSelectSession={selectSession}
-          activeProjectId={activeProject?.id}
           onRenameSession={(id, title) => void renameSession(id, title)}
           onDeleteSession={(id) => void deleteSession(id)}
         />
         )}
-        <ChatView
-          data={chatData}
-          hasMore={hasMore}
-          onLoadMore={() => void loadOlder()}
-          status={status}
-          pending={pending}
-          sessionId={activeId}
-          connState={connState}
-          selectedModel={selectedModel}
-          onSelectModel={setSelectedModel}
-          onSend={send}
-          onReply={reply}
-          onAbort={abort}
-          onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
-          autoMode={autoMode}
-          onToggleAuto={toggleAuto}
-          echo={echo}
-          isolation={activeIsolation}
-          onWorktreeAction={handleWorktreeAction}
-          wtNotice={wtNotice}
-        />
-        <div className="hidden w-96 shrink-0 min-[1180px]:block">
-          <WorkbenchPanel openRequest={openFileReq} editedPaths={chatData.editedPaths} />
+        {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onChange={setSidebarWidth} />}
+        <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            <ChatView
+              data={chatData}
+              hasMore={hasMore}
+              onLoadMore={() => void loadOlder()}
+              status={status}
+              pending={pending}
+              sessionId={activeId}
+              connState={connState}
+              selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
+              onSend={send}
+              onReply={reply}
+              onAbort={abort}
+              onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
+              autoMode={autoMode}
+              onToggleAuto={toggleAuto}
+              echo={echo}
+              isolation={activeIsolation}
+              onWorktreeAction={handleWorktreeAction}
+              wtNotice={wtNotice}
+            />
+            {workbenchOpen && (
+              <div className="hidden min-[1180px]:contents">
+                <VerticalSplitter label="调整右侧工作区宽度" value={workbenchWidth} min={320} max={workbenchMax} direction={-1} onChange={setWorkbenchWidth} />
+                <div className="shrink-0" style={{ width: workbenchWidth }}>
+                  <WorkbenchPanel key={activeId ?? "new-task"} sessionId={activeId} openRequest={openFileReq} editedPaths={chatData.editedPaths} />
+                </div>
+              </div>
+            )}
+          </div>
+          {bottomPanelOpen && <>
+            <HorizontalSplitter label="调整底部调试面板高度" value={bottomPanelHeight} min={160} max={bottomPanelMax} onChange={setBottomPanelHeight} />
+            <div className="flex min-h-0 shrink-0 border-t border-line" style={{ height: bottomPanelHeight }}>
+              <TerminalPane key={activeId ?? "new-task"} sessionId={activeId} />
+            </div>
+          </>}
         </div>
       </div>
 
@@ -519,6 +659,7 @@ export default function App() {
           onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
           onSelectSession={selectSession}
           onClose={() => setPalette(null)}
+          sessionId={activeId}
         />
       )}
 
@@ -526,6 +667,16 @@ export default function App() {
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[0.6875rem] text-ink-3">
         <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "animate-pulse bg-live" : "bg-ink-3"}`} />
         <span>{statusLabel(status)}</span>
+        <button
+          type="button"
+          onClick={toggleBottomPanel}
+          title={bottomPanelOpen ? "收起终端（⌘J / Ctrl+J）" : "打开终端（⌘J / Ctrl+J）"}
+          aria-label={bottomPanelOpen ? "收起终端" : "打开终端"}
+          aria-keyshortcuts="Meta+J Control+J"
+          className="flex h-5 w-5 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
         <span className="text-line-strong">·</span>
         <span className="font-mono">
           model: {modelLabel}

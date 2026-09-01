@@ -5,6 +5,7 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveWithinWorkspace } from "@/lib/paths";
+import { workspaceRootForSession } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,7 +17,7 @@ const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", ".w
 /** GET /api/fs/search?q=main — 递归文件名搜索（⌘P 文件快开，限深限噪）。 */
 export async function GET(request: NextRequest) {
   const q = (request.nextUrl.searchParams.get("q") ?? "").toLowerCase();
-  const root = resolveWithinWorkspace("");
+  const root = resolveWithinWorkspace("", workspaceRootForSession(request.nextUrl.searchParams.get("sessionId")));
   const out: { path: string; type: "dir" | "file" }[] = [];
 
   async function walk(dir: string, rel: string, depth: number) {
