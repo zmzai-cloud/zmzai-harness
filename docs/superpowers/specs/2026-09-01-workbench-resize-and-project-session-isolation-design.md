@@ -2,7 +2,7 @@
 
 ## Scope
 
-Refine the active Lectern desktop workbench in three focused ways:
+Refine the active Lectern desktop workbench in four focused ways:
 
 1. The divider between the session sidebar and conversation, and the divider
    between the conversation and right workbench, are independently draggable.
@@ -11,6 +11,46 @@ Refine the active Lectern desktop workbench in three focused ways:
    is selected.
 3. The control in the top-right of the workbench collapses and restores only the
    right workbench. It must never collapse the session sidebar.
+4. The right workbench becomes an outcome-oriented task surface: every data
+   source uses the active project's root; generated work is immediately
+   reviewable, previewable, and editable without requiring users to understand
+   internal panel names.
+
+## Task Workbench
+
+The right panel has three primary tabs plus a persistent terminal:
+
+- **审查** is the change review surface. It presents the current project's git
+  diff, prioritizes files touched by the active task, and retains check-point
+  recovery for git repositories.
+- **文件** is the current project's file explorer and editor. All filesystem
+  routes resolve the workspace root dynamically at request time through
+  `activeWorkspaceRoot()`, rather than importing a mutable root binding. The
+  root heading identifies the active project and a refresh action reloads it.
+- **成果预览** replaces the vague “画布”. It automatically selects the most
+  recent HTML-like file touched by the active task, previews it in a sandboxed
+  iframe, and offers desktop/mobile viewport modes plus an explicit file picker
+  fallback. When there is no previewable result, the empty state says exactly
+  what qualifies and links to the active task's changed files.
+
+The existing repo map is removed from the primary tab rail. It remains available
+only on demand from the command palette as “查看代码脉络”, where its output is
+framed as an agent-facing code index rather than a generic map. It is not shown
+to users who only need to inspect a task's result.
+
+The terminal remains permanently docked beneath the active tab and adopts the
+VS Code interaction model: an identifiable active terminal tab, new-terminal
+and shell-picker controls, split terminal creation, close, clear, and restart.
+PTY sessions are interactive shells rooted in the active project. If the local
+runtime only supports pipe mode, the UI calls that limitation out clearly and
+offers one-command runs without pretending it is a full shell. Terminal output
+must print a single terminal-exit marker per state transition, not on every
+polling cycle.
+
+`WorkbenchPanel` receives the active task's edited paths and selection updates;
+it is the single owner of the default review/preview behavior. Newly created
+or modified previewable artifacts immediately select the results tab. An
+explicit user tab selection is respected for the remainder of that task view.
 
 ## Layout And Interaction
 
