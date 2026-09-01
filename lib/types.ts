@@ -88,6 +88,21 @@ export type GitStatus = {
   error?: string;
 };
 
+/** 宿主机探测到的 shell 候选（面板下拉 + 交互会话起哪一个）。 */
+export type ShellCandidate = {
+  file: string;
+  label: string;
+};
+
+export type TerminalListResult = {
+  backendKind: "pty" | "pipe";
+  sessions: TerminalSession[];
+  /** 系统默认 shell；探测不到时为 null。 */
+  defaultShell: ShellCandidate | null;
+  /** 本机全部候选（含默认，默认排第一），供面板切换。 */
+  shells: ShellCandidate[];
+};
+
 export type TerminalSession = {
   id: string;
   name?: string;

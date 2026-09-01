@@ -17,6 +17,7 @@ import type {
   SessionIsolation,
   SkillOption,
   TerminalChunk,
+  TerminalListResult,
   TerminalSession,
   ThinkingEffort,
   TranscriptMessage,
@@ -137,10 +138,15 @@ export const client = {
 
   gitStatus: () => fetch("/api/git/status").then((r) => j<GitStatus>(r)),
 
-  terminalList: () =>
-    fetch("/api/terminal").then((r) => j<{ backendKind: "pty" | "pipe"; sessions: TerminalSession[] }>(r)),
+  terminalList: () => fetch("/api/terminal").then((r) => j<TerminalListResult>(r)),
 
   terminalStart: (command: string) => post("/api/terminal", { command }).then((r) => j<TerminalSession>(r)),
+
+  /** 起一条交互式 shell 会话；不传 shell 时跟随系统默认（zsh/bash/fish/pwsh…）。 */
+  terminalStartShell: (shell?: string) =>
+    post("/api/terminal", { interactive: true, ...(shell ? { shell } : {}) }).then(
+      (r) => j<TerminalSession>(r),
+    ),
 
   terminalRead: (id: string, cursor: number) =>
     fetch(`/api/terminal/${id}/read?cursor=${cursor}`).then((r) => j<TerminalChunk>(r)),
