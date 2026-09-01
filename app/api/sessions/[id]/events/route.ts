@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 const HEARTBEAT_MS = 15_000;
 
 /**
- * SSE 事件流：UI 的 window.harness.subscribe 同构替代（EventSource）。
+ * SSE 事件流：UI 的 window.lecternNative.subscribe 同构替代（EventSource）。
  *
  * 断线续传：`?since=<seq>` 从该序号之后重放（subscribeEventLog 的 sinceSeq
  * 重放 + live 合并），客户端重连时带上最后收到的 seq 即可无缺口恢复。
