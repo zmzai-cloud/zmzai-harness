@@ -13,6 +13,7 @@ import {
   loadCustomAgents,
   startMcpServers,
   reclaimExpiredLeases,
+  listActiveSessions,
   TerminalManager,
   type AgentFramework,
   type EventLog,
@@ -155,6 +156,15 @@ export function terminalManager(): TerminalManager {
 /** 当前项目的工作区路径（routes 统一从这里取，避免误用旧常量）。 */
 export function activeWorkspaceRoot(): string {
   return getActiveProject().path;
+}
+
+/**
+ * UI/API 的会话有效根目录。隔离会话必须始终查看和修改其 worktree，
+ * 不能因为页面上的当前项目切换而落回主工作区。
+ */
+export function workspaceRootForSession(sessionId?: string | null): string {
+  const worktree = sessionId ? worktreeForSession(sessionId) : null;
+  return worktree?.path ?? activeWorkspaceRoot();
 }
 
 /** 切换项目后同步 live binding 与 runtime 缓存指向。 */
@@ -382,4 +392,45 @@ export async function sessionStoreFor(id: string): Promise<{ store: SqliteSessio
     }
   }
   return null;
+}
+
+/** 优雅收尾（会话稳定性 P2，Electron before-quit 经 HTTP 触发）：
+ *  遍历全局 running 会话逐个 abort（走正常收尾链：tool parts 归 error、
+ *  事件落库、lease 清除），再对所有已打开 SQLite store 做 wal_checkpoint
+ *  把 WAL 刷回主库。相比直接 kill 子进程，运行中会话不会被砍在半截。
+ *  返回收尾统计（abort 数 / checkpoint 数），供调用方日志与超时兜底判断。 */
+export async function gracefulShutdown(): Promise<{ aborted: number; checkpointed: number }> {
+  // 1) 中止所有 running 会话。listActiveSessions 是 framework 模块级
+  //    globalThis 单例，跨项目/跨 worktree runtime 共享，拿全量。
+  const activeIds = listActiveSessions();
+  let aborted = 0;
+  for (const id of activeIds) {
+    try {
+      await sessionRuntime(id).runner.abort(id);
+      aborted += 1;
+    } catch {
+      /* 单个会话 abort 失败不阻塞整体退出 */
+    }
+  }
+
+  // 2) checkpoint 所有已打开 store。runtime 闭包里已创建的 SqliteSessionStore
+  //    都在 __lecternRuntimes 缓存里（含 worktree 隔离 runtime，与主项目同库——
+  //    按 store 引用去重，避免同库重复 checkpoint）。
+  const runtimes = globalThis.__lecternRuntimes;
+  let checkpointed = 0;
+  if (runtimes) {
+    const seen = new Set<SqliteSessionStore>();
+    for (const rt of runtimes.values()) {
+      const store = rt.store as SqliteSessionStore;
+      if (seen.has(store)) continue;
+      seen.add(store);
+      try {
+        await store.checkpoint();
+        checkpointed += 1;
+      } catch {
+        /* 单库 checkpoint 失败不阻塞 */
+      }
+    }
+  }
+  return { aborted, checkpointed };
 }

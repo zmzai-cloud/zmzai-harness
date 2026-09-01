@@ -20,6 +20,7 @@ let webProcess = null;
 let tray = null;
 let pollTimer = null;
 let authWin = null;
+let gracefulDone = false;
 
 /** 创建菜单栏托盘（macOS）：图标 + 状态文字点（绿●运行中 / 黄◐等待授权），
  *  点击唤起/聚焦主窗。仅打包时创建（dev 下反复重建托盘体验差，
@@ -274,11 +275,34 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   app.isQuitting = true;
   clearInterval(pollTimer);
   globalShortcut.unregisterAll();
-  webProcess?.kill();
+  // 优雅收尾（会话稳定性 P2）：先经 HTTP 让内嵌 server 中止 running 会话
+  // （正常收尾链：tool parts 归 error、事件落库、lease 清除）+ checkpoint，
+  // 再杀子进程。已收尾过（重复 before-quit）直接放行；服务未就绪/超时
+  // 走兜底（kill），不阻塞退出。
+  if (gracefulDone) return;
+  event.preventDefault();
+  void (async () => {
+    try {
+      const res = await fetch(`${WEB_URL}/api/shutdown/graceful`, {
+        method: "POST",
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.log(`[lectern] 优雅收尾完成：abort ${body.aborted ?? 0} 会话 / checkpoint ${body.checkpointed ?? 0} 库`);
+      }
+    } catch (err) {
+      // dev 下 next dev 可能已退 / 生产下 server 未就绪：静默降级为硬杀
+      console.warn(`[lectern] 优雅收尾未完成，硬杀兜底：${err?.message ?? err}`);
+    }
+    gracefulDone = true;
+    webProcess?.kill();
+    app.exit(0);
+  })();
 });
 
 app.on("window-all-closed", () => {
