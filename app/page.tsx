@@ -12,7 +12,8 @@ import WorkbenchPanel from "@/components/WorkbenchPanel";
 import AccountBlock from "@/components/AccountBlock";
 import { client, type ConnectionState } from "@/lib/client";
 import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
-import type { SessionInfo, PermissionRequest, PermissionSettings, HarnessEvent, ModelRef, ThinkingEffort, AuthStatus } from "@/lib/types";
+import { readPref, writePref } from "@/lib/prefs";
+import type { SessionInfo, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
 function statusLabel(status: string): string {
@@ -68,6 +69,25 @@ export default function App() {
   const paletteActionsRef = useRef<{ newSession: () => void }>({ newSession: () => undefined });
   // 左侧栏收起/展开（Qoder 同款，持久化）
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 会话级 worktree 隔离（robustness-plan §9）：新建会话默认勾选「隔离副本」（持久化）
+  const [isolateNew, setIsolateNew] = useState(false);
+  // active 会话的隔离状态（切换会话时按服务端为准查询）+ 操作结果横幅
+  const [activeIsolation, setActiveIsolation] = useState<SessionIsolation | null>(null);
+  const [wtNotice, setWtNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const toggleIsolateNew = useCallback(() => {
+    setIsolateNew((v) => {
+      writePref("isolateNew", v ? "0" : "1");
+      return !v;
+    });
+  }, []);
+
+  // 隔离操作横幅自动消退（8s）
+  useEffect(() => {
+    if (!wtNotice) return;
+    const t = setTimeout(() => setWtNotice(null), 8000);
+    return () => clearTimeout(t);
+  }, [wtNotice]);
 
   useEffect(() => {
     void client.authStatus().then(setAuth);
@@ -87,16 +107,16 @@ export default function App() {
 
   // 自治档位持久化（localStorage，纯前端语义）+ 权限自动执行配置（settings.json）
   useEffect(() => {
-    setAutoMode(window.localStorage.getItem("harness.autoMode") === "1");
-    setSidebarOpen(window.localStorage.getItem("harness.sidebar") !== "0");
-    void client.permissionsGet().then((permissions) => {
+    setAutoMode(readPref("autoMode") === "1");
+    setSidebarOpen(readPref("sidebar") !== "0");
+    setIsolateNew(readPref("isolateNew") === "1");    void client.permissionsGet().then((permissions) => {
       setPermAuto(permissions);
       permAutoRef.current = permissions;
     }).catch(() => undefined);
   }, []);
   const toggleAuto = useCallback(() => {
     setAutoMode((v) => {
-      window.localStorage.setItem("harness.autoMode", v ? "0" : "1");
+      writePref("autoMode", v ? "0" : "1");
       return !v;
     });
   }, []);
@@ -136,13 +156,17 @@ export default function App() {
     // 订阅先建立（不丢事件），转录异步载入期间实时事件进 buffer；
     // 转录 ingest 完成后再合并 buffer——投影顺序仍是 历史→实时。
     let historyLoaded = false;
-    const liveBuffer: HarnessEvent[] = [];
+    const liveBuffer: LecternEvent[] = [];
     projector.reset();
     setChatData(EMPTY_CHAT_VIEW);
     setStatus("idle");
     setPending(null);
     setEcho(null);
     setConnState("connected");
+    setActiveIsolation(null);
+    setWtNotice(null);
+    // 隔离副本状态以服务端为准（worktree 映射在 worktrees.db）
+    client.worktreeStatus(activeId).then((st) => !cancelled && setActiveIsolation(st)).catch(() => undefined);
     const unsub = client.subscribe(activeId, (ev) => {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
@@ -218,7 +242,7 @@ export default function App() {
     prevStatusRef.current = status;
     if (prev === "running" && status === "idle") {
       document.title = "✓ 任务完成 — Lectern";
-      const bridge = window.harnessNative;
+      const bridge = window.lecternNative;
       if (document.hidden && bridge?.notifyTaskDone) {
         bridge.notifyTaskDone();
       } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {
@@ -250,10 +274,14 @@ export default function App() {
 
   const newSession = useCallback(async () => {
     if (!auth?.loggedIn) return;
-    const s = await client.createSession(activeAgent);
+    const s = await client.createSession(activeAgent, undefined, isolateNew);
     setSessions((prev) => [s, ...prev]);
     setActiveId(s.id);
-  }, [activeAgent, auth?.loggedIn]);
+    setActiveIsolation(s.isolation ? { ...s.isolation } : { enabled: false });
+    if (s.isolation && !s.isolation.enabled && s.isolation.reason) {
+      setWtNotice({ kind: "error", text: "隔离副本未启用（当前项目不是 git 仓库），本次会话直接在主工作区进行。" });
+    }
+  }, [activeAgent, auth?.loggedIn, isolateNew]);
 
   // 全局快捷键：⌘/Ctrl+N 新建会话（侧栏主按钮同款提示）
   useEffect(() => {
@@ -274,9 +302,10 @@ export default function App() {
       let sid = activeId;
       if (!sid) {
         if (!auth?.loggedIn) return;
-        const s = await client.createSession(activeAgent);
+        const s = await client.createSession(activeAgent, undefined, isolateNew);
         setSessions((prev) => [s, ...prev]);
         setActiveId(s.id);
+        setActiveIsolation(s.isolation ?? { enabled: false });
         sid = s.id;
       }
       // 乐观回显：发送瞬间显示用户气泡，真实 message.updated 到达后自动让位
@@ -293,7 +322,28 @@ export default function App() {
       void client.listSessions().then(setSessions);
       setTimeout(() => void client.listSessions().then(setSessions), 4000);
     },
-    [activeId, activeAgent, auth?.loggedIn, selectedModel],
+    [activeId, activeAgent, auth?.loggedIn, selectedModel, isolateNew],
+  );
+
+  // worktree 隔离副本操作：合并回主工作区 / 丢弃副本（结果用横幅提示，冲突给引导）
+  const handleWorktreeAction = useCallback(
+    async (action: "merge" | "discard") => {
+      if (!activeId) return;
+      if (action === "merge" && !window.confirm("把隔离副本的提交合并回主工作区当前分支？合并成功后副本将删除。")) return;
+      if (action === "discard" && !window.confirm("丢弃隔离副本？未合并的提交将一并删除，不可恢复。")) return;
+      try {
+        const result = await client.worktreeAction(activeId, action);
+        if (result.ok) {
+          setActiveIsolation({ enabled: false });
+          setWtNotice({ kind: "ok", text: action === "merge" ? "已合并回主工作区，隔离副本已清理。" : "隔离副本已丢弃。" });
+        } else {
+          setWtNotice({ kind: "error", text: result.output ?? result.error ?? "操作失败" });
+        }
+      } catch (err) {
+        setWtNotice({ kind: "error", text: err instanceof Error ? err.message : "操作失败" });
+      }
+    },
+    [activeId],
   );
 
   const reply = useCallback(
@@ -350,7 +400,7 @@ export default function App() {
               type="button"
               onClick={() =>
                 setSidebarOpen((v) => {
-                  window.localStorage.setItem("harness.sidebar", v ? "0" : "1");
+                  writePref("sidebar", v ? "0" : "1");
                   return !v;
                 })
               }
@@ -380,6 +430,8 @@ export default function App() {
           activeId={activeId}
           onNewSession={() => void newSession()}
           canCreate={!!auth?.loggedIn}
+          isolateNew={isolateNew}
+          onToggleIsolateNew={toggleIsolateNew}
           onSelectSession={setActiveId}
           onRenameSession={(id, title) => void renameSession(id, title)}
           onDeleteSession={(id) => void deleteSession(id)}
@@ -402,6 +454,9 @@ export default function App() {
           autoMode={autoMode}
           onToggleAuto={toggleAuto}
           echo={echo}
+          isolation={activeIsolation}
+          onWorktreeAction={handleWorktreeAction}
+          wtNotice={wtNotice}
         />
         <div className="hidden w-96 shrink-0 min-[1180px]:block">
           <WorkbenchPanel openRequest={openFileReq} editedPaths={chatData.editedPaths} />

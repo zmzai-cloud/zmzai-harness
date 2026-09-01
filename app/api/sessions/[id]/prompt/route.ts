@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveModel, sessionCookieName } from "@/lib/relay";
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 import { withRequestCookie } from "@/lib/request-cookie";
 import { generateSessionTitle } from "@/lib/session-title";
 
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const cookieHeader = cookie ? `${sessionCookieName}=${cookie}` : null;
 
   const model = body?.model ?? (await resolveModel(body?.agent, cookieHeader));
-  const runtime = cloudRuntime();
+  const runtime = sessionRuntime(id);
 
   // 自动标题（两段式）：①先落占位标题（首条消息摘要，立即生效不叫「新会话」）；
   // ②prompt 发出后异步调 LLM 生成 AI 摘要标题覆盖（见 lib/session-title.ts）。

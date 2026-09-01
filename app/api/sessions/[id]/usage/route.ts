@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,8 +29,8 @@ function tokensOf(event: { type?: string; tokens?: TokenShape; data?: unknown })
  *  input + cacheRead + output ≈ 当前窗口占用。事件日志在内存（重启归零，UI 显示 0%）。 */
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = cloudRuntime();
-  const contextWindow = Number(process.env.HARNESS_CONTEXT_WINDOW ?? 128_000);
+  const runtime = sessionRuntime(id);
+  const contextWindow = Number(process.env.LECTERN_CONTEXT_WINDOW ?? process.env.HARNESS_CONTEXT_WINDOW ?? 128_000);
   try {
     const events = await runtime.eventLog.read(id, 0, 5000);
     let last: TokenShape | null = null;

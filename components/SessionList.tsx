@@ -26,12 +26,15 @@ type Props = {
   onNewSession?: () => void;
   /** 新建会话是否可用（未登录 relay 时禁用）。 */
   canCreate?: boolean;
+  /** 新会话默认使用隔离副本（git worktree，robustness-plan §9），持久化开关。 */
+  isolateNew?: boolean;
+  onToggleIsolateNew?: () => void;
   onSelectSession: (id: string) => void;
   onRenameSession: (id: string, title: string) => void;
   onDeleteSession: (id: string) => void;
 };
 
-export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, onSelectSession, onRenameSession, onDeleteSession }: Props) {
+export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession }: Props) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -63,6 +66,30 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
             <span>新建会话</span>
             <span className="ml-auto font-mono text-[0.625rem] text-ink-3">⌘N</span>
           </button>
+          {onToggleIsolateNew && (
+            <button
+              type="button"
+              onClick={onToggleIsolateNew}
+              title={
+                isolateNew
+                  ? "新会话将使用隔离副本（git worktree）：改动只进副本，合并前主工作区零污染"
+                  : "开启后新会话使用隔离副本（git worktree）：改动只进副本，合并前主工作区零污染"
+              }
+              className={cn(
+                "mt-1.5 flex h-7 w-full items-center gap-1.5 rounded-sm px-2 text-[0.6875rem] transition-colors",
+                isolateNew ? "bg-accent text-accent-ink" : "text-ink-3 hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" className="shrink-0">
+                <circle cx="4.5" cy="3.5" r="1.7" />
+                <circle cx="4.5" cy="12.5" r="1.7" />
+                <circle cx="11.5" cy="6.5" r="1.7" />
+                <path d="M4.5 5.2v5.6M11.5 8.2c0 2-2 2.6-5.2 2.8" strokeLinecap="round" />
+              </svg>
+              <span>新会话隔离副本</span>
+              <span className="ml-auto font-mono text-[0.625rem]">{isolateNew ? "ON" : "OFF"}</span>
+            </button>
+          )}
         </div>
       )}
 

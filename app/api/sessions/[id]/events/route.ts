@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 
 import { subscribeEventLog } from "@zmzai/agent-framework";
 
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ const HEARTBEAT_MS = 15_000;
  */
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = cloudRuntime();
+  const runtime = sessionRuntime(id);
   const encoder = new TextEncoder();
 
   const sinceRaw = Number(new URL(request.url).searchParams.get("since") ?? "0");

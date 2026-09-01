@@ -3,7 +3,7 @@ import type {
   AuthStatus,
   GitDiff,
   GitStatus,
-  HarnessEvent,
+  LecternEvent,
   KeyStatus,
   McpStatuses,
   ModelRef,
@@ -14,6 +14,7 @@ import type {
   RelayKeyInfo,
   ProjectsState,
   SessionInfo,
+  SessionIsolation,
   SkillOption,
   TerminalChunk,
   TerminalSession,
@@ -27,7 +28,6 @@ import type {
  * 浏览器端 API 客户端：Web 与 Electron 共用同一套页面、同一套 HTTP 接口。
  * 替代旧版 window.harness（IPC），同构后 UI 不再感知宿主差异。
  */
-
 /** SSE 连接状态：connected 正常 / reconnecting 退避重连中 / offline 连续失败待手动。 */
 export type ConnectionState = "connected" | "reconnecting" | "offline";
 
@@ -70,8 +70,18 @@ export const client = {
     fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`)
       .then((r) => j<{ query: string; results: { sessionId: string; title: string; snippet: string }[] }>(r)),
 
-  createSession: (agent?: string, model?: ModelRef) =>
-    post("/api/sessions", { agent, model }).then((r) => j<SessionInfo>(r)),
+  createSession: (agent?: string, model?: ModelRef, isolate?: boolean) =>
+    post("/api/sessions", { agent, model, isolate }).then((r) => j<SessionInfo>(r)),
+
+  /** 会话 worktree 隔离状态（隔离副本会话 → { enabled: true, path, branch }）。 */
+  worktreeStatus: (sessionId: string) =>
+    fetch(`/api/sessions/${sessionId}/worktree`).then((r) => j<SessionIsolation & { commits?: number }>(r)),
+
+  /** worktree 合并回主工作区（merge）或丢弃隔离副本（discard）。 */
+  worktreeAction: (sessionId: string, action: "merge" | "discard") =>
+    post(`/api/sessions/${sessionId}/worktree`, { action }).then((r) =>
+      j<{ ok: boolean; output?: string; conflicts?: string[]; error?: string }>(r),
+    ),
 
   renameSession: (sessionId: string, title: string) =>
     send("PATCH", `/api/sessions/${sessionId}`, { title }).then((r) => j<{ ok?: boolean; error?: string }>(r)),
@@ -226,7 +236,7 @@ export const client = {
    *  返回取消函数。 */
   subscribe: (
     sessionId: string,
-    cb: (ev: HarnessEvent) => void,
+    cb: (ev: LecternEvent) => void,
     onState?: (state: ConnectionState) => void,
   ) => {
     let es: EventSource | null = null;
@@ -245,7 +255,7 @@ export const client = {
       };
       es.onmessage = (e) => {
         try {
-          const ev = JSON.parse(e.data) as HarnessEvent & { seq?: number };
+          const ev = JSON.parse(e.data) as LecternEvent & { seq?: number };
           if (typeof ev.seq === "number" && ev.seq > lastSeq) lastSeq = ev.seq;
           cb(ev);
         } catch {

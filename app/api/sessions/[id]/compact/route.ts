@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  *  摘要落为 compaction part 并发事件，前端事件流自动收到刷新）。 */
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = cloudRuntime();
+  const runtime = sessionRuntime(id);
   try {
     const result = await runtime.runner.compactSession(id);
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });

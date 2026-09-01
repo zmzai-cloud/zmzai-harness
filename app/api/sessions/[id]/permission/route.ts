@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 import { auditPermission } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     return NextResponse.json({ error: "参数不完整" }, { status: 400 });
   }
 
-  const runtime = cloudRuntime();
+  const runtime = sessionRuntime(id);
   await runtime.runner.replyPermission(id, body.requestId, body.reply, body.feedback);
 
   auditPermission({

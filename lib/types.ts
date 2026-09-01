@@ -19,6 +19,17 @@ export type SessionInfo = {
   time: { created: string; updated?: string };
   /** 运行态（GET /api/sessions 附带，来自 runner activeRuns）。 */
   running?: boolean;
+  /** 会话级 worktree 隔离状态（POST /api/sessions 创建时附带；切换会话经 worktree status 查询）。 */
+  isolation?: SessionIsolation;
+};
+
+/** git worktree 隔离（robustness-plan §9）：隔离副本会话在独立 worktree 工作，合并前主工作区零污染。 */
+export type SessionIsolation = {
+  enabled: boolean;
+  /** 降级原因（enabled=false 时）：not-a-git-repo / git-error 等。 */
+  reason?: string;
+  path?: string;
+  branch?: string;
 };
 
 export type ToolState =
@@ -46,7 +57,7 @@ export type PermissionRequest = {
   tool?: { messageId: string; callId: string };
 };
 
-export type HarnessEvent = { type: string; data: unknown };
+export type LecternEvent = { type: string; data: unknown };
 
 /** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
 export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string } }; parts: Part[] };
@@ -160,7 +171,7 @@ export const PERMISSION_DOMAIN_OF: Record<string, PermissionDomain> = {
 export type RelayKeyInfo = {
   loggedIn: boolean;
   keys: { id: string; name: string; prefix: string; status: "active" | "revoked"; quotaUsedTokens: number; monthlySpendUsedMicros: number; monthlySpendLimitMicros: number; lastUsedAt: string | null }[];
-  /** harness 当前绑定 key 的 prefix（前 12 位，与列表匹配「使用中」）。 */
+  /** lectern 当前绑定 key 的 prefix（前 12 位，与列表匹配「使用中」）。 */
   currentPrefix: string | null;
   error?: string;
 };
@@ -185,8 +196,8 @@ export type PluginInfo = {
   hasMcp: boolean;
 };
 
-/** Electron 宿主桥（preload.cjs 注入 window.harnessNative；Web 端不存在，需能力探测降级）。 */
-export type HarnessNativeBridge = {
+/** Electron 宿主桥（preload.cjs 注入 window.lecternNative；Web 端不存在，需能力探测降级）。 */
+export type LecternNativeBridge = {
   pickFolder?: () => Promise<string | null>;
   /** 任务完成系统通知（主进程 Notification；仅 Electron 宿主存在）。 */
   notifyTaskDone?: () => void;
@@ -198,6 +209,6 @@ export type HarnessNativeBridge = {
 
 declare global {
   interface Window {
-    harnessNative?: HarnessNativeBridge;
+    lecternNative?: LecternNativeBridge;
   }
 }

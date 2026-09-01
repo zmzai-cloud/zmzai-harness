@@ -3,7 +3,7 @@ import { Markdown, PermissionCard, Reasoning, ToolCard, ToolGroup, cn } from "@z
 
 import type { ConnectionState } from "@/lib/client";
 import type { ChatViewData, TodoItem } from "@/lib/chat-projector";
-import type { ModelRef, Part, PermissionRequest } from "@/lib/types";
+import type { ModelRef, Part, PermissionRequest, SessionIsolation } from "@/lib/types";
 import Composer from "./Composer";
 import DiffView, { diffStat } from "./DiffView";
 
@@ -203,6 +203,11 @@ type Props = {
   onLoadMore: () => void;
   /** 乐观回显：发送瞬间的用户消息（真实 message.updated 到达后自动让位）。 */
   echo: { text: string; images: { url: string; mediaType: string }[] } | null;
+  /** 会话级 worktree 隔离状态（robustness-plan §9）：隔离会话顶栏出「隔离副本」pill + 合并/丢弃。 */
+  isolation?: SessionIsolation | null;
+  onWorktreeAction?: (action: "merge" | "discard") => Promise<void>;
+  /** 隔离操作结果横幅（page.tsx 持有，8s 自动消退）。 */
+  wtNotice?: { kind: "ok" | "error"; text: string } | null;
 };
 
 /** 任务计划卡：todo.updated 投影（Agent 拆解步骤的实时进度）。 */
@@ -248,7 +253,7 @@ function TodoCard({ todos }: { todos: TodoItem[] }) {
   );
 }
 
-export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo }: Props) {
+export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice }: Props) {
   const { messages, todos, reads } = data;
   // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
@@ -337,6 +342,36 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
             {connState === "offline" ? "已断开" : "重连中"}
           </span>
         )}
+        {/* 会话级 worktree 隔离（robustness-plan §9）：pill 常驻标识 + 合并/丢弃 */}
+        {isolation?.enabled && onWorktreeAction && (
+          <span className="inline-flex items-center gap-1 rounded-pill bg-surface-2 py-0.5 pl-2 pr-1 text-[0.6875rem] font-medium text-ink-2">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <circle cx="4.5" cy="3.5" r="1.7" />
+              <circle cx="4.5" cy="12.5" r="1.7" />
+              <circle cx="11.5" cy="6.5" r="1.7" />
+              <path d="M4.5 5.2v5.6M11.5 8.2c0 2-2 2.6-5.2 2.8" strokeLinecap="round" />
+            </svg>
+            <span title={isolation.path}>隔离副本</span>
+            <button
+              type="button"
+              disabled={running}
+              onClick={() => void onWorktreeAction("merge")}
+              title="把副本提交合并回主工作区当前分支（主工作区有未提交改动时会拒绝）"
+              className="rounded-pill px-1.5 py-0.5 text-[0.625rem] font-medium text-ink transition-colors hover:bg-accent hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              合并
+            </button>
+            <button
+              type="button"
+              disabled={running}
+              onClick={() => void onWorktreeAction("discard")}
+              title="丢弃副本（未合并的提交一并删除）"
+              className="rounded-pill px-1.5 py-0.5 text-[0.625rem] font-medium text-ink-3 transition-colors hover:bg-danger-tint hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              丢弃
+            </button>
+          </span>
+        )}
         {/* 自治档位（P1-7）：对标 Qoder 的 Quest 自动执行 */}
         <button
           type="button"
@@ -371,6 +406,17 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
           {connState === "offline"
             ? `连接已断开（${downSeconds}s）——正在后台重试，也可点击会话列表重建连接`
             : `连接中断，正在恢复…（已断 ${downSeconds}s，恢复后自动补齐缺失消息）`}
+        </div>
+      )}
+      {/* 隔离副本操作结果横幅（合并成功 / 冲突引导 / 丢弃确认） */}
+      {wtNotice && (
+        <div
+          className={cn(
+            "flex h-7 shrink-0 items-center gap-2 border-b px-4 text-[0.6875rem]",
+            wtNotice.kind === "ok" ? "border-line bg-success-tint text-success" : "border-danger/30 bg-danger-tint text-danger",
+          )}
+        >
+          <span className="truncate">{wtNotice.text}</span>
         </div>
       )}
       {/* 上下文读取 pill（P2-13）：本轮 Agent 读过的文件，点击联动打开 */}

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { cloudRuntime } from "@/lib/runtime";
+import { sessionRuntime } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  */
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = cloudRuntime();
+  const runtime = sessionRuntime(id);
   const messages = await runtime.store.getMessages(id);
 
   const url = new URL(request.url);
