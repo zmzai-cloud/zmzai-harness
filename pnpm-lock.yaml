@@ -18,8 +18,8 @@ importers:
         specifier: link:../zmzai-framework
         version: link:../zmzai-framework
       '@zmzai/theme':
-        specifier: ^0.9.8
-        version: 0.9.8(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
+        specifier: ^0.9.10
+        version: 0.9.10(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
       next:
         specifier: 15.5.21
         version: 15.5.21(@opentelemetry/api@1.9.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1282,8 +1282,8 @@ packages:
   '@xterm/xterm@6.0.0':
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
 
-  '@zmzai/theme@0.9.8':
-    resolution: {integrity: sha512-VT+8lq4+L3bIXiReY53x1xNWv8AawfSlNkhPf8fjk+qXz71/zTJiLVs6Y33GBbBEZWJQNWdsdQ5lU8FjKihb0w==}
+  '@zmzai/theme@0.9.10':
+    resolution: {integrity: sha512-23yyd49Lh6EEjxSRLZGfwV2ybjcIFJvqcYATGRcKXP4dcVteNfwdpz6oM0kLlX8nK9dAaZNOhvq0oWmN/loyvQ==}
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
@@ -4232,7 +4232,7 @@ snapshots:
 
   '@xterm/xterm@6.0.0': {}
 
-  '@zmzai/theme@0.9.8(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
+  '@zmzai/theme@0.9.10(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
     dependencies:
       '@radix-ui/react-dialog': 1.1.23(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-dropdown-menu': 2.1.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
