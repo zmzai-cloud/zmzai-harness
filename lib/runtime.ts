@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   createAgentRuntime,
   createSqliteSessionStore,
+  createSqliteEventLog,
   createMemoryEventLog,
   createOpenAiModelProvider,
   createFsWorkspaceFiles,
@@ -11,14 +12,17 @@ import {
   createHostTerminalBackend,
   loadCustomAgents,
   startMcpServers,
+  reclaimExpiredLeases,
   TerminalManager,
   type AgentFramework,
+  type EventLog,
   type FailoverEndpoint,
   type FailoverEvent,
   type McpServerStatus,
   type McpPoolResult,
   type ModelProvider,
   type ModelRef,
+  type SqliteSessionStore,
 } from "@zmzai/agent-framework";
 import { currentCookieHeader } from "./request-cookie";
 import { authHeaders, ollamaBase } from "./settings";
@@ -59,6 +63,10 @@ declare global {
   var __lecternMcp: Map<string, McpRuntimeState> | undefined;
   // eslint-disable-next-line no-var
   var __lecternFailoverLog: FailoverEvent[] | undefined;
+  // eslint-disable-next-line no-var
+  var __lecternLeaseTargets: Set<{ store: SqliteSessionStore; log: EventLog }> | undefined;
+  // eslint-disable-next-line no-var
+  var __lecternLeaseTimer: ReturnType<typeof setInterval> | undefined;
 }
 
 /** 每项目的 MCP 连接态（/api/mcp 透出；localTools/baseTools 为内部装配引用，
@@ -112,6 +120,26 @@ function failoverEndpointsFromEnv(): FailoverEndpoint[] {
 /** 路由降级环形日志（P0 可观测）：最近 20 次端点切换，/api/models 透出。 */
 export function failoverLog(): FailoverEvent[] {
   return (globalThis.__lecternFailoverLog ??= []);
+}
+
+/** 租约恢复注册（会话稳定性 P0-③）：每项目一个 SQLite store，全进程共用一条
+ *  60s 扫描循环遍历所有已注册 store。进程崩溃/重启后，遗留过期租约的会话在
+ *  ≤60s 内被收尾：pending 权限自动拒、running 工具归 error、发出"运行因服务
+ *  重启中断，可在同一会话继续"事件（事件持久化在 SQLite，重启前挂着的页面
+ *  SSE 重连后也能收到）。首个扫描在启动时立即执行。 */
+function registerLeaseRecovery(target: { store: SqliteSessionStore; log: EventLog }): void {
+  const targets = (globalThis.__lecternLeaseTargets ??= new Set());
+  targets.add(target);
+  if (globalThis.__lecternLeaseTimer) return;
+  const scan = async () => {
+    for (const t of globalThis.__lecternLeaseTargets ?? []) {
+      await reclaimExpiredLeases({ store: t.store, log: t.log, finalizeStore: t.store }).catch(() => undefined);
+    }
+  };
+  void scan().catch(() => undefined);
+  const timer = setInterval(() => void scan().catch(() => undefined), 60_000);
+  timer.unref?.();
+  globalThis.__lecternLeaseTimer = timer;
 }
 
 /** 终端会话管理器单例：既供 agent 的 terminal 工具使用，
@@ -201,10 +229,17 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
     modelId: process.env.OPENAI_MODEL ?? "gpt-4o",
   };
 
+  // 会话与事件同库持久化（会话稳定性 P0-①④）：SQLite store + SQLite eventLog
+  // 共用 <dataDir>/zmzai.db——事件跨进程重启留存，SSE since 续传跨重启无缝；
+  // 租约接线（P0-③）：runner 起 run 盖章、结束清除，崩溃后由恢复循环收尾。
+  const sessionStore = createSqliteSessionStore({ dataDir: dir });
+  const eventLog = createSqliteEventLog({ dataDir: dir });
+  registerLeaseRecovery({ store: sessionStore, log: eventLog });
+
   const runtime = createAgentRuntime({
     // SQLite 存储升级（N4）：单文件 zmzai.db 替代多文件 JSONL；首次自动导入旧数据
-    store: createSqliteSessionStore({ dataDir: dir }),
-    eventLog: createMemoryEventLog(),
+    store: sessionStore,
+    eventLog,
     modelProvider: provider,
     // 本机工作区：builtin 的 read/write/edit/glob/grep 直接落在工作区；
     // repo_map 能力（R1）随 fs 工作区默认开启（隔离会话落 worktree）
@@ -216,6 +251,9 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
     capabilities: { repoMap: { workspaceRoot: wsRoot }, subagents: 1 },
     // 自动上下文压缩（spec §8.3）：摘要模型沿用主模型，接近窗口时折叠
     runnerOptions: {
+      // 租约接线（P0-③）：runner 起 run 盖章、结束清除；崩溃/重启后由
+      // registerLeaseRecovery 的扫描循环收尾过期租约
+      leaseStore: sessionStore,
       compaction: {
         enabled: true,
         contextWindow: contextWindowFor(),
