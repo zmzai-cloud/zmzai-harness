@@ -118,6 +118,21 @@ export class ChatProjector {
       this.editedPaths.unshift(d.path);
     } else if (ev.type === "todo.updated") {
       this.todos = (ev.data as { todos: TodoItem[] }).todos;
+    } else if (ev.type === "session.error") {
+      // 会话级错误（StreamIdleTimeout 看门狗断流 / APIError 重试耗尽 / LeaseExpired
+      // 服务重启等）没有对应 assistant 消息落地——挂到最后一条 assistant（无则
+      // 合成一条），让错误卡与「继续」chip 有处安放，用户看得到「断了、能续跑」。
+      const d = ev.data as { name: string; message: string };
+      const err = { name: d.name, message: d.message };
+      const lastAssistantId = [...this.order].reverse().find((id) => this.messages.get(id)?.role === "assistant");
+      if (lastAssistantId) {
+        const m = this.messages.get(lastAssistantId)!;
+        if (!m.error || m.error.message !== err.message) m.error = err;
+      } else {
+        const id = `error-${d.name.toLowerCase()}-${Date.now().toString(36)}`;
+        this.messages.set(id, { id, role: "assistant", parts: new Map(), error: err });
+        this.order.push(id);
+      }
     } else if (ev.type === "subagent.started") {
       const d = ev.data as { id: string };
       this.subagentActivity.set(d.id, { steps: [] });
