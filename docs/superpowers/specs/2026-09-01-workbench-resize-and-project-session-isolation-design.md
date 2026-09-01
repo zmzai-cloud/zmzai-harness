@@ -23,10 +23,11 @@ The right panel has three primary tabs plus a persistent terminal:
 - **审查** is the change review surface. It presents the current project's git
   diff, prioritizes files touched by the active task, and retains check-point
   recovery for git repositories.
-- **文件** is the current project's file explorer and editor. All filesystem
-  routes resolve the workspace root dynamically at request time through
-  `activeWorkspaceRoot()`, rather than importing a mutable root binding. The
-  root heading identifies the active project and a refresh action reloads it.
+- **文件** is the current task's file explorer and editor. Every file, git,
+  preview, map, and terminal request includes the active session ID and resolves
+  an effective root at request time: that session's worktree when isolation is
+  enabled, otherwise `activeWorkspaceRoot()`. The root heading identifies the
+  active project or isolated copy and a refresh action reloads it.
 - **成果预览** replaces the vague “画布”. It automatically selects the most
   recent HTML-like file touched by the active task, previews it in a sandboxed
   iframe, and offers desktop/mobile viewport modes plus an explicit file picker
@@ -41,16 +42,26 @@ to users who only need to inspect a task's result.
 The terminal remains permanently docked beneath the active tab and adopts the
 VS Code interaction model: an identifiable active terminal tab, new-terminal
 and shell-picker controls, split terminal creation, close, clear, and restart.
-PTY sessions are interactive shells rooted in the active project. If the local
-runtime only supports pipe mode, the UI calls that limitation out clearly and
-offers one-command runs without pretending it is a full shell. Terminal output
-must print a single terminal-exit marker per state transition, not on every
-polling cycle.
+PTY sessions are interactive shells rooted in the active task's effective root.
+They are tagged by owner session and root: project or task switches show only
+the matching terminals, while collapsing the right panel preserves their
+processes and buffers. A switch or application unmount may only clean up the
+terminals it owns. If the local runtime only supports pipe mode, the UI calls
+that limitation out clearly and offers one-command runs without pretending it
+is a full shell. Terminal output must print a single terminal-exit marker per
+state transition, not on every polling cycle.
 
-`WorkbenchPanel` receives the active task's edited paths and selection updates;
-it is the single owner of the default review/preview behavior. Newly created
-or modified previewable artifacts immediately select the results tab. An
-explicit user tab selection is respected for the remainder of that task view.
+`WorkbenchPanel` receives the active session ID, task's edited paths, and
+selection updates; its key is the active session ID, so selected tabs, preview
+files, tree expansion, terminal buffers, and in-flight file loads are reset or
+cancelled when the task changes. It is the single owner of default
+review/preview behavior. Newly created or modified previewable artifacts
+immediately select the results tab. An explicit user tab selection is respected
+until that session changes.
+
+Results preview supports HTML and HTM files. It uses an opaque sandbox and
+serves root-constrained local assets from a dedicated artifact route so relative
+stylesheets, scripts, and images load without granting same-origin privileges.
 
 ## Layout And Interaction
 
@@ -124,6 +135,12 @@ or write any right-workbench state.
   and narrow-to-wide state restoration.
 - API/client state cases cover two projects with distinct session stores plus
   stale `lastSession` and legacy `pendingSession` values.
+- Disjoint project roots plus an isolated session prove that file tree, read,
+  write, search, git diff/checkpoints, result preview, code-map command, and
+  terminal creation resolve to the session's effective root after switches.
+- Session switching cancels stale responses and cannot display another task's
+  preview, selected file, explicit tab, or terminal buffer. A local-asset HTML
+  artifact is rendered inside the opaque preview sandbox.
 - Drag each vertical divider independently and confirm neighboring content does
   not overflow or become unusable.
 - Collapse and restore the right workbench; confirm the session sidebar remains
