@@ -50,7 +50,9 @@ const usePublicAcl = (env.OSS_PUBLIC_ACL ?? "true") !== "false";
 const distDir = resolve(process.cwd(), "dist");
 
 // ── 产物清单 ──
-const patterns = [/\.dmg$/, /\.zip$/, /\.exe$/, /^SHA256SUMS\.txt$/];
+// latest(-mac).yml 是 electron-updater 自动更新的配置（指向真实产物名），必须一并上传；
+// 否则客户端拉 latest.yml 拿到 404。
+const patterns = [/\.dmg$/, /\.zip$/, /\.exe$/, /^SHA256SUMS\.txt$/, /^latest(-mac)?\.yml$/];
 const files = readdirSync(distDir).filter((f) => {
   const st = statSync(join(distDir, f));
   return st.isFile() && patterns.some((re) => re.test(f));

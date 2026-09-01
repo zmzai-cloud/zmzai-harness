@@ -99,7 +99,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Lectern"
+      "shortcutName": "Lectern",
+      "artifactName": "Lectern-Setup-${version}.${ext}"
     }
   }
 }
