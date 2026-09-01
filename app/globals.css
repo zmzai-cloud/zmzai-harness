@@ -177,7 +177,7 @@ html[data-theme="dark"] {
   }
 }
 
-/* ===== Electron 集成标题栏（html.electron 由首帧脚本按 harnessNative 存在性注入） =====
+/* ===== Electron 集成标题栏（html.electron 由首帧脚本按 lecternNative 存在性注入） =====
  * 顶栏整体可拖拽窗口；交互元素恢复点击。浏览器中 -webkit-app-region 无效，天然无害。 */
 html.electron header {
   -webkit-app-region: drag;

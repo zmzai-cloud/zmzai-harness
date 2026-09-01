@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Badge, Button, Logo, Wordmark } from "@zmzai/theme";
-import type { AgentInfo, SessionInfo, HarnessEvent, PermissionRequest, TranscriptMessage, AuthStatus } from "./types";
+import type { AgentInfo, SessionInfo, LecternEvent, PermissionRequest, TranscriptMessage, AuthStatus } from "./types";
 import SessionList from "./components/SessionList";
 import ChatView from "./components/ChatView";
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成 ChatView 已支持的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。 */
-function transcriptToEvents(messages: TranscriptMessage[]): HarnessEvent[] {
-  const out: HarnessEvent[] = [];
+function transcriptToEvents(messages: TranscriptMessage[]): LecternEvent[] {
+  const out: LecternEvent[] = [];
   for (const m of messages) {
     out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role } } });
     for (const p of m.parts) {
@@ -35,7 +35,7 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeAgent, setActiveAgent] = useState<string>("default");
-  const [events, setEvents] = useState<HarnessEvent[]>([]);
+  const [events, setEvents] = useState<LecternEvent[]>([]);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
@@ -64,7 +64,7 @@ export default function App() {
     // 历史恢复与实时流的竞态防护：订阅先建立（不丢事件），转录异步载入期间
     // 实时事件先进 buffer；转录渲染完成后再合并——顺序仍是 历史→实时。
     let historyLoaded = false;
-    const liveBuffer: HarnessEvent[] = [];
+    const liveBuffer: LecternEvent[] = [];
     setEvents([]);
     setStatus("idle");
     setPending(null);

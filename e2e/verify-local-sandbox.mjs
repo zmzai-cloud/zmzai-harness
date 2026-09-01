@@ -7,8 +7,8 @@ import { resolve } from "node:path";
 import { execSync } from "node:child_process";
 
 const BASE = "http://127.0.0.1:3100";
-const HARNESS_ROOT = resolve(import.meta.dirname, "..");
-const WS = resolve(process.env.HARNESS_WORKSPACE ?? HARNESS_ROOT, ".workspace");
+const LECTERN_ROOT = resolve(import.meta.dirname, "..");
+const WS = resolve(process.env.LECTERN_WORKSPACE ?? process.env.HARNESS_WORKSPACE ?? LECTERN_ROOT, ".workspace");
 const DEMO_FILE = "sandbox-demo.txt";
 
 // ---- 0. 工作区就绪（git init 以便 git 工具可查） ----

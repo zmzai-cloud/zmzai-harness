@@ -44,7 +44,7 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    const bridge = window.harnessNative;
+    const bridge = window.lecternNative;
     if (!bridge?.openAuthWindow || !bridge.onSsoCookie) return;
     setSsoReady(true);
     bridge.onSsoCookie(finishSso);
@@ -54,7 +54,7 @@ export default function LoginPage() {
     setError(null);
     setSsoHint("正在打开登录窗口…");
     // 已有共享会话（此前登录过）时主进程直接返回 cookie，免再登一次
-    const existing = await window.harnessNative!.openAuthWindow!();
+    const existing = await window.lecternNative!.openAuthWindow!();
     if (existing) finishSso(existing);
     else setSsoHint("在登录窗口完成 GitHub 或账号登录后会自动返回");
   };

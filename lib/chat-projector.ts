@@ -1,4 +1,4 @@
-import type { HarnessEvent, Part, TranscriptMessage } from "./types";
+import type { LecternEvent, Part, TranscriptMessage } from "./types";
 
 /** ChatView 消息树的数据类型与投影器。
  *
@@ -29,8 +29,8 @@ export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads:
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。
  *  注意：转录不含运行时事件（file.edited / delta），历史消息因此没有
  *  内联 diff——与旧全量恢复行为一致。 */
-export function transcriptToEvents(messages: TranscriptMessage[]): HarnessEvent[] {
-  const out: HarnessEvent[] = [];
+export function transcriptToEvents(messages: TranscriptMessage[]): LecternEvent[] {
+  const out: LecternEvent[] = [];
   for (const m of messages) {
     out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role, ...(m.info.error ? { error: m.info.error } : {}) } } });
     for (const p of m.parts) {
@@ -65,7 +65,7 @@ export class ChatProjector {
   }
 
   /** 折叠单个事件（分支逻辑与原 project() 逐条对应，行为保持不变）。 */
-  ingest(ev: HarnessEvent): void {
+  ingest(ev: LecternEvent): void {
     if (ev.type === "message.updated") {
       const m = (ev.data as { message: { id: string; role: string; error?: { name: string; message: string } } }).message;
       const existing = this.messages.get(m.id);
@@ -136,7 +136,7 @@ export class ChatProjector {
 
   /** 折叠一批事件。prepend=true 时本批新建的消息插到时间线最前
    *  （触顶加载更早历史的场景；批内相对顺序保持，批与已加载的实时事件互不重叠）。 */
-  ingestBatch(events: HarnessEvent[], prepend = false): void {
+  ingestBatch(events: LecternEvent[], prepend = false): void {
     if (!prepend) {
       for (const ev of events) this.ingest(ev);
       return;

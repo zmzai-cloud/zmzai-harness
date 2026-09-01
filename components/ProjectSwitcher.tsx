@@ -8,7 +8,7 @@ import type { ProjectsState } from "@/lib/types";
 
 /**
  * 项目切换器（左侧栏顶部）：列出最近项目 + 添加本地文件夹。
- * App 内走系统原生对话框（window.harnessNative.pickFolder）；Web 降级为手动输入路径。
+ * App 内走系统原生对话框（window.lecternNative.pickFolder）；Web 降级为手动输入路径。
  * 切换后服务端 workspaceRoot 全站跟随（会话/文件/Git/终端换库），页面整体重载。
  */
 export default function ProjectSwitcher() {
@@ -70,7 +70,7 @@ export default function ProjectSwitcher() {
   );
 
   const pickFolder = useCallback(async () => {
-    const bridge = window.harnessNative;
+    const bridge = window.lecternNative;
     if (bridge?.pickFolder) {
       const path = await bridge.pickFolder();
       if (path) await add(path);
@@ -81,7 +81,7 @@ export default function ProjectSwitcher() {
   }, [add]);
 
   const active = state?.active;
-  const hasBridge = typeof window !== "undefined" && Boolean(window.harnessNative?.pickFolder);
+  const hasBridge = typeof window !== "undefined" && Boolean(window.lecternNative?.pickFolder);
 
   return (
     <div ref={rootRef} className="relative shrink-0 border-b border-line px-3 py-2.5">

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
-export type HarnessEvent = { type: string; data: unknown };
+export type LecternEvent = { type: string; data: unknown };
 
 export type McpServerStatus = {
   name: string;
@@ -79,8 +79,8 @@ const harness = {
   },
 
   /** 订阅某会话事件流。返回取消函数。 */
-  subscribe: (sessionId: string, cb: (ev: HarnessEvent) => void) => {
-    const listener = (_e: IpcRendererEvent, sid: string, ev: HarnessEvent) => {
+  subscribe: (sessionId: string, cb: (ev: LecternEvent) => void) => {
+    const listener = (_e: IpcRendererEvent, sid: string, ev: LecternEvent) => {
       if (sid === sessionId) cb(ev);
     };
     ipcRenderer.on("harness:event", listener);

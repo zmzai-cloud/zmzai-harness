@@ -6,6 +6,7 @@ import { Button, Navbar } from "@zmzai/theme";
 
 import AccountBlock from "@/components/AccountBlock";
 import { client } from "@/lib/client";
+import { readPref, writePref } from "@/lib/prefs";
 import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo } from "@/lib/types";
 
 /**
@@ -307,7 +308,7 @@ export default function SettingsPage() {
 
   const toggleNav = () =>
     setNavOpen((v) => {
-      localStorage.setItem("harness.sidebar", v ? "0" : "1");
+      writePref("sidebar", v ? "0" : "1");
       return !v;
     });
 

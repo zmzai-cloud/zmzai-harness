@@ -9,8 +9,8 @@ const { app, BrowserWindow, dialog, ipcMain, session, utilityProcess, Tray, glob
 const fs = require("node:fs");
 const path = require("node:path");
 
-const WEB_PORT = Number(process.env.HARNESS_WEB_PORT ?? 3100);
-const WEB_URL = (process.env.HARNESS_WEB_URL ?? `http://127.0.0.1:${WEB_PORT}`).replace(/\/$/, "");
+const WEB_PORT = Number(process.env.LECTERN_WEB_PORT ?? 3100);
+const WEB_URL = (process.env.LECTERN_WEB_URL ?? `http://127.0.0.1:${WEB_PORT}`).replace(/\/$/, "");
 // SSO 登录页（与 muzhi /login 同一跳转目标）：GitHub OAuth / 邮箱密码都在这里完成
 const AUTH_SSO_URL = (process.env.AUTH_SSO_URL ?? "https://auth.zmzai.cloud").replace(/\/$/, "");
 // 共享会话 cookie 名（zmzai-auth SESSION_COOKIE_NAME 默认值，种在 .zmzai.cloud 父域）
@@ -23,10 +23,10 @@ let authWin = null;
 
 /** 创建菜单栏托盘（macOS）：图标 + 状态文字点（绿●运行中 / 黄◐等待授权），
  *  点击唤起/聚焦主窗。仅打包时创建（dev 下反复重建托盘体验差，
- *  HARNESS_TRAY=1 可强制开启调试）。 */
+ *  LECTERN_TRAY=1 可强制开启调试）。 */
 function createTray() {
   if (process.platform !== "darwin") return;
-  if (!app.isPackaged && process.env.HARNESS_TRAY !== "1") return;
+  if (!app.isPackaged && process.env.LECTERN_TRAY !== "1") return;
   const iconPath = path.join(__dirname, "..", "build", "icon.png");
   const icon = fs.existsSync(iconPath)
     ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
@@ -77,7 +77,7 @@ function registerGlobalShortcut() {
 }
 
 /** 主进程任务完成通知（Electron 下 Web Notification 未聚焦时不可靠，走主进程）。
- *  渲染进程通过 harnessNative.notifyTaskDone() 桥接触发。 */
+ *  渲染进程通过 lecternNative.notifyTaskDone() 桥接触发。 */
 function notifyTaskDone() {
   if (!Notification.isSupported()) return;
   new Notification({ title: "zmzai harness", body: "任务已完成，回来看看结果" }).show();
@@ -174,12 +174,12 @@ function ensureWebServer() {
       PORT: String(WEB_PORT),
       HOSTNAME: "127.0.0.1",
       // 覆盖相对路径：打包后 cwd 是 asar（只读），会话与工作区必须落用户目录。
-      // HARNESS_DATA_DIR / HARNESS_WORKSPACE 是 lib/runtime-constants 实际读取的变量；
+      // LECTERN_DATA_DIR / LECTERN_WORKSPACE 是 lib/runtime-constants 实际读取的变量；
       // ZMZAI_* 为兼容别名保留（勿只写 ZMZAI_*：旧版曾因此把数据写进 app 包内）
       ZMZAI_DATA_DIR: path.join(userData, "data"),
-      HARNESS_DATA_DIR: path.join(userData, "data"),
+      LECTERN_DATA_DIR: path.join(userData, "data"),
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
-      HARNESS_WORKSPACE: path.join(userData, "workspace"),
+      LECTERN_WORKSPACE: path.join(userData, "workspace"),
     },
     // inherit：stdout/stderr 转发到主进程（调试可见）
     stdio: "inherit",
@@ -230,7 +230,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // 原生文件夹选择对话框（preload 暴露为 window.harnessNative.pickFolder）
+  // 原生文件夹选择对话框（preload 暴露为 window.lecternNative.pickFolder）
   ipcMain.handle("dialog:pickFolder", async () => {
     const win = BrowserWindow.getAllWindows()[0];
     if (!win) return null;
@@ -240,7 +240,7 @@ app.whenReady().then(async () => {
     });
     return res.canceled ? null : (res.filePaths[0] ?? null);
   });
-  // 任务完成通知桥（preload 暴露为 window.harnessNative.notifyTaskDone）
+  // 任务完成通知桥（preload 暴露为 window.lecternNative.notifyTaskDone）
   ipcMain.on("notify:taskDone", () => notifyTaskDone());
 
   // SSO 登录桥：打开 auth 子窗口；若默认 session 已有共享会话 cookie 直接返回（免再登）

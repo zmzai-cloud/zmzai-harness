@@ -14,5 +14,5 @@ App 端增强（桌面专属：本地文件、git、MCP、交互式终端），�
 - `vite/electron.vite.config.ts` — 旧 electron-vite 构建配置（增强时恢复）
 
 接入增强时：`electron/main.cjs` 引入 `legacy/engine/engine.ts`（需 tsx/esbuild
-编译或迁移为 .cjs），preload 暴露本地能力，页面通过 `window.harnessNative`
+编译或迁移为 .cjs），preload 暴露本地能力，页面通过 `window.lecternNative`
 检测宿主能力做渐进增强（App 多入口、Web 隐藏）。

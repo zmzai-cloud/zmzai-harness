@@ -27,7 +27,7 @@ declare global {
       login: () => Promise<{ opened: boolean; url: string }>;
       authStatus: () => Promise<import("./types").AuthStatus>;
       onAuthChanged: (cb: () => void) => () => void;
-      subscribe: (sessionId: string, cb: (ev: import("./types").HarnessEvent) => void) => () => void;
+      subscribe: (sessionId: string, cb: (ev: import("./types").LecternEvent) => void) => () => void;
     };
   }
 }

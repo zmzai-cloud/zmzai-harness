@@ -44,7 +44,7 @@ export type PermissionRequest = {
   tool?: { messageId: string; callId: string };
 };
 
-export type HarnessEvent = { type: string; data: unknown };
+export type LecternEvent = { type: string; data: unknown };
 
 /** MCP server 连接状态（来自 harness:mcp-init / mcp-status）。 */
 export type McpServerStatus = {

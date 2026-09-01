@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, MessageItem, PermissionCard, Reasoning, Textarea, ToolCard } from "@zmzai/theme";
-import type { HarnessEvent, Part, PermissionRequest } from "../types";
+import type { LecternEvent, Part, PermissionRequest } from "../types";
 
 type UiMessage = { id: string; role: string; parts: Part[] };
 
 /** 把事件流投影成消息树：message.updated 建壳，part.updated 定稿，part.delta 增量文本 */
-function project(events: HarnessEvent[]): UiMessage[] {
+function project(events: LecternEvent[]): UiMessage[] {
   const messages = new Map<string, { id: string; role: string; parts: Map<string, Part> }>();
   const order: string[] = [];
   for (const ev of events) {
@@ -111,7 +111,7 @@ function Composer({ onSend, onAbort, running }: { onSend: (t: string) => void; o
 }
 
 type Props = {
-  events: HarnessEvent[];
+  events: LecternEvent[];
   status: string;
   pending: PermissionRequest | null;
   onSend: (t: string) => void;
