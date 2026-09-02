@@ -223,6 +223,10 @@ export default function App() {
   const [openFileReq, setOpenFileReq] = useState<{ path: string; ts: number; line?: number } | null>(null);
   // P1-7 自治档位：自动 = 授权请求自动「始终允许」
   const [autoMode, setAutoMode] = useState(false);
+  // ref 镜像：档位只在 SSE 订阅闭包里被读取（判断授权是否自动放行），若不走镜像
+  // 就得把它列进订阅 effect 的依赖——那样每次切换档位都会 unsub + 重订阅、
+  // 重置投影器并整段重拉历史。与下方 permAutoRef 同一套处理方式。
+  const autoModeRef = useRef(false);
   // 设置 → 通用 → 权限：细粒度自动执行配置（terminal/edit/task/gitWrite）。
   // ref 镜像：SSE 订阅闭包读最新值，配置变更不重订阅。
   const [permAuto, setPermAuto] = useState<PermissionSettings>({});
@@ -304,13 +308,23 @@ export default function App() {
 
   // 自治档位持久化（localStorage，纯前端语义）+ 权限自动执行配置（settings.json）
   useEffect(() => {
-    setAutoMode(readPref("autoMode") === "1");
+    const initialAuto = readPref("autoMode") === "1";
+    setAutoMode(initialAuto);
+    // 这里同步赋一次，避免首条授权请求早于下方镜像 effect 抵达时读到初始值
+    autoModeRef.current = initialAuto;
     setSidebarOpen(readPref("sidebar") !== "0");
-    setIsolateNew(readPref("isolateNew") === "1");    void client.permissionsGet().then((permissions) => {
+    setIsolateNew(readPref("isolateNew") === "1");
+    void client.permissionsGet().then((permissions) => {
       setPermAuto(permissions);
       permAutoRef.current = permissions;
     }).catch(() => undefined);
   }, []);
+
+  // 档位变更后同步镜像，让 SSE 订阅闭包读到最新值（从而不必重订阅）
+  useEffect(() => {
+    autoModeRef.current = autoMode;
+  }, [autoMode]);
+
   const toggleAuto = useCallback(() => {
     setAutoMode((v) => {
       writePref("autoMode", v ? "0" : "1");
@@ -489,12 +503,14 @@ export default function App() {
       else if (ev.type === "permission.asked") {
         const req = (ev.data as { request: PermissionRequest }).request;
         // P1-7 自动档：全部「始终允许」；细粒度权限（设置 → 通用）：命中的域自动「始终允许」
+        // 两者都读 ref 镜像，配置/档位变更不触发重订阅
         const domain = PERMISSION_DOMAIN_OF[req.permission];
-        const autoHit = autoMode || (domain && permAutoRef.current[domain] === "auto");
+        const isAuto = autoModeRef.current;
+        const autoHit = isAuto || (domain && permAutoRef.current[domain] === "auto");
         if (autoHit) {
           void client
             .replyPermission(activeId, req.id, "always", undefined, {
-              source: autoMode ? "auto" : "fine-grained",
+              source: isAuto ? "auto" : "fine-grained",
               permission: req.permission,
               summary: req.metadata?.summary ?? req.metadata?.command ?? req.metadata?.filePath ?? "",
             })
@@ -523,7 +539,9 @@ export default function App() {
       cancelled = true;
       unsub();
     };
-  }, [activeId, autoMode, flushProjection]);
+    // autoMode / permAuto 均经 ref 镜像读取，不列入依赖——否则切换档位或权限
+    // 配置会整段重跑：断开重连 SSE、重置投影器、重拉历史转录。
+  }, [activeId, flushProjection]);
 
   // 触顶加载更早历史：prepend 进投影器（不破坏已折叠的实时事件），视口锚定在 ChatView。
   // 投影按消息 id 幂等 upsert，SSE 重连的重放事件天然去重，无需额外标记。
