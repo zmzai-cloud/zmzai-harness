@@ -177,6 +177,186 @@ html[data-theme="dark"] {
   }
 }
 
+/* ═══ 工作台语义 class（V0）═══════════════════════════════════════════════
+ * 来源：visual-system-realignment spec §3.2（圆角/边框/阴影）、§3.4（间距与
+ * 高度）、§4.7（splitter）、§5（组件落地边界）。
+ *
+ * 纪律：
+ * - 只消费既有语义令牌（--color-* ），不写硬编码色值（§7.3）；
+ * - 放在 components 层，utility 仍能覆盖，便于逐处微调而不破语义；
+ * - 用 CSS 逻辑属性（inline-size / block-size / inset-*），深浅与 RTL 同构。
+ */
+@layer components {
+  /* ── 区域容器：结构层无圆角、无阴影，靠单条 line 分隔（§3.2）──
+   * 「避免卡片套卡片」：区域本身不画 border，由相邻区域的 border-r/l 承担。 */
+  .wb-region {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    background: var(--color-surface);
+  }
+  .wb-region-edge-r {
+    border-right: 1px solid var(--color-line);
+  }
+  .wb-region-edge-l {
+    border-left: 1px solid var(--color-line);
+  }
+
+  /* ── 主面板条：任务上下文条 / 一级 tab 条，34--36px（§3.4）── */
+  .wb-bar {
+    display: flex;
+    flex: none;
+    height: 36px;
+    align-items: center;
+    gap: 4px;
+    padding-inline: 8px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  /* ── 次级条：文件树/终端 tab 行、紧凑 footer，30--32px（§3.4）── */
+  .wb-bar-sm {
+    display: flex;
+    flex: none;
+    height: 32px;
+    align-items: center;
+    gap: 8px;
+    padding-inline: 12px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  /* ── 一级 tab：underline 风格、3px 圆角，不是胶囊、不用阴影（§3.2/§5）──
+   * 选中态用 inset 下划线（accent）而非反色块：层级靠结构而非色块重量。 */
+  .wb-tab {
+    display: inline-flex;
+    flex: none;
+    height: 28px;
+    align-items: center;
+    gap: 4px;
+    padding-inline: 10px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-ink-3);
+    transition:
+      background-color 120ms var(--ease-spring),
+      color 120ms var(--ease-spring);
+  }
+  .wb-tab:hover {
+    background: var(--color-surface-2);
+    color: var(--color-ink);
+  }
+  .wb-tab[aria-selected="true"] {
+    color: var(--color-ink);
+    border-radius: 3px 3px 0 0;
+    box-shadow: inset 0 -2px 0 0 var(--color-accent);
+  }
+
+  /* ── 图标按钮：28x28 最小触达区（§3.4），3px 圆角非胶囊（§3.2）── */
+  .wb-iconbtn {
+    display: inline-flex;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    color: var(--color-ink-3);
+    transition:
+      background-color 120ms var(--ease-spring),
+      color 120ms var(--ease-spring);
+  }
+  .wb-iconbtn:hover {
+    background: var(--color-surface-2);
+    color: var(--color-ink);
+  }
+
+  /* ── 空态：说明「这里做什么」，不只是「无数据」（§4.5 戒律）── */
+  .wb-empty {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+  }
+
+  /* ── 分隔线：保留既有 12px 热区（V0 不改尺寸约束），1px 静默轨道 + 四态反馈 ──
+   * hover/focus → 3px selected-strong（可抓）；drag → accent 实心（已抓住）；
+   * 双击复位与 tooltip 由组件的 onReset / title 提供（§4.7）。 */
+  .wb-splitter {
+    position: relative;
+    flex: none;
+    touch-action: none;
+    outline: none;
+  }
+  .wb-splitter-v {
+    width: 12px;
+    cursor: col-resize;
+  }
+  .wb-splitter-h {
+    height: 12px;
+    cursor: row-resize;
+  }
+  .wb-splitter-track {
+    position: absolute;
+    pointer-events: none;
+    background: var(--color-line);
+    transition:
+      background-color 120ms var(--ease-spring),
+      inline-size 120ms var(--ease-spring),
+      block-size 120ms var(--ease-spring);
+  }
+  .wb-splitter-v .wb-splitter-track {
+    inset-block: 0;
+    inline-size: 1px;
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+  }
+  .wb-splitter-h .wb-splitter-track {
+    inset-inline: 0;
+    block-size: 1px;
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+  }
+  /* hover / focus：轨道加粗到 3px 并提亮，给出「可抓」的反馈 */
+  .wb-splitter:hover .wb-splitter-track,
+  .wb-splitter:focus-visible .wb-splitter-track {
+    background: var(--color-selected-strong);
+  }
+  .wb-splitter-v:hover .wb-splitter-track,
+  .wb-splitter-v:focus-visible .wb-splitter-track {
+    inline-size: 3px;
+  }
+  .wb-splitter-h:hover .wb-splitter-track,
+  .wb-splitter-h:focus-visible .wb-splitter-track {
+    block-size: 3px;
+  }
+  /* drag：用 accent 实心表达「已抓住并正在改变」，与 hover 明显区分 */
+  .wb-splitter[data-dragging="true"] .wb-splitter-track {
+    background: var(--color-accent);
+  }
+  .wb-splitter-v[data-dragging="true"] .wb-splitter-track {
+    inline-size: 3px;
+  }
+  .wb-splitter-h[data-dragging="true"] .wb-splitter-track {
+    block-size: 3px;
+  }
+  .wb-splitter:focus-visible {
+    outline: 2px solid var(--color-selected-strong);
+    outline-offset: -2px;
+  }
+
+  /* ── 键盘可达的统一焦点环（§7.2：颜色不是唯一表达）── */
+  .wb-tab:focus-visible,
+  .wb-iconbtn:focus-visible {
+    outline: 2px solid var(--color-selected-strong);
+    outline-offset: 1px;
+  }
+}
+
 /* ===== Electron 集成标题栏（html.electron 由首帧脚本按 lecternNative 存在性注入） =====
  * 顶栏整体可拖拽窗口；交互元素恢复点击。浏览器中 -webkit-app-region 无效，天然无害。 */
 html.electron header {

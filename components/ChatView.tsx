@@ -748,7 +748,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
                         type="button"
                         title="编辑重发（截断此消息之后的对话并重新执行）"
                         onClick={() => setEditing({ id: m.id, text })}
-                        className="flex h-6 w-6 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                        className="wb-iconbtn"
                       >
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
                           <path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5 12.8l-3 .7.7-3 8.6-8.2z" strokeLinejoin="round" />

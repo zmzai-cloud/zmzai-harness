@@ -79,11 +79,11 @@ const FILE_TREE_WIDTH_KEY = "lectern:file-tree-width";
 /**
  * 产物侧工作台（VS Code 风格）：
  *  ┌──────────────────────────────────────────────┐
- *  │ 顶部 tab：[审查][文件][画布][地图]             │
+ *  │ 顶部 tab：[审查][文件][成果预览]（一级 tab）   │
  *  ├──────────┬───────────────────────────────────┤
- *  │ FileTree │   内容区（preview/review/results） │
+ *  │ FileTree │   内容区（preview/review/files）   │
  *  └──────────┴───────────────────────────────────┘
- * 「画布打开」把文件 Tab 的 HTML 产物送进画布 Tab；openRequest 是外部联动
+ * 「预览打开」把文件 Tab 的 HTML 产物送进成果预览；openRequest 是外部联动
  * （消息内路径点击 / ⌘P 文件快开 / 工具卡路径）请求打开某个文件（可带行号）。
  */
 export default function WorkbenchPanel({
@@ -257,7 +257,7 @@ export default function WorkbenchPanel({
                   </button>
                 ))}
               </div>
-              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
+              <div className="wb-bar-sm">
                 <span className="truncate font-mono text-[0.6875rem] text-ink-2" title={activeFile.path}>
                   {activeFile.path}
                 </span>
@@ -281,9 +281,9 @@ export default function WorkbenchPanel({
                       setCanvasPath(activeFile.path);
                       select("preview");
                     }}
-                    className="shrink-0 rounded-pill bg-surface-2 px-2 py-0.5 text-[0.625rem] font-medium text-ink-2 transition-colors hover:text-ink"
+                    className="shrink-0 rounded-[3px] bg-surface-2 px-2 py-0.5 text-[0.625rem] font-medium text-ink-2 transition-colors hover:text-ink"
                   >
-                    画布打开
+                    预览打开
                   </button>
                 )}
               </div>
@@ -300,7 +300,7 @@ export default function WorkbenchPanel({
             </div>
           ) : (
             /* 无激活文件：显示本轮改动 chips（预览区中央） */
-            <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+            <div className="wb-empty">
               {editedPaths && editedPaths.length > 0 ? (
                 <div className="flex max-w-md flex-col items-center gap-3 text-center">
                   <span className="text-[0.6875rem] uppercase tracking-wider text-ink-3">
@@ -340,18 +340,20 @@ export default function WorkbenchPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface">
-      {/* 顶部 tab 行（终端不再占位，常驻底部） */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-2">
+    <div className="wb-region wb-region-edge-l h-full flex-col">
+      {/* 一级 tab 行：underline 风格（accent 内嵌下划线），不再是反色胶囊。
+          spec §3.2「不得把常规工具按钮做成胶囊」+ §5 WorkbenchPanel 责任。
+          终端不在此行占位，常驻底部 Debug Area。 */}
+      <div className="wb-bar" role="tablist" aria-label="工作区面板">
         {TABS.map((t) => (
           <button
             key={t.key}
+            id={`wb-tab-${t.key}`}
             type="button"
+            role="tab"
+            aria-selected={tab === t.key}
             onClick={() => select(t.key)}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-pill px-2.5 py-1 text-xs font-medium transition-colors",
-              tab === t.key ? "bg-ink text-paper" : "text-ink-3 hover:bg-surface-2 hover:text-ink",
-            )}
+            className="wb-tab"
           >
             {t.icon}
             {t.label}
@@ -359,13 +361,14 @@ export default function WorkbenchPanel({
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      {/* 面板区：与 tablist 配对，aria-labelledby 指向当前选中 tab */}
+      <div className="flex min-h-0 flex-1" role="tabpanel" aria-labelledby={`wb-tab-${tab}`}>
           {/* 左侧文件树（VSCode 风格 explorer，仅文件 tab 显示；其他 tab 让出全部宽度） */}
           {tab === "files" && (
             <>
-              <div className="flex min-h-0 shrink-0 flex-col border-r border-line bg-surface" style={{ width: treeWidth }}>
-                {/* 树头部 */}
-                <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-line px-2 text-[0.6875rem] font-medium uppercase tracking-wider text-ink-3">
+              <div className="wb-region wb-region-edge-r flex-col" style={{ width: treeWidth }}>
+                {/* 树头部：32px（§3.4「文件/终端 tab 行 30--32px」，原 28px 偏矮） */}
+                <div className="wb-bar-sm gap-1.5 px-2 text-[0.6875rem] font-medium uppercase tracking-wider text-ink-3">
                   <span>资源管理器</span>
                   <span className="ml-auto text-[0.625rem] normal-case tracking-normal text-ink-3">↻</span>
                 </div>

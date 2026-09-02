@@ -38,8 +38,10 @@ function readWidth(key: string, fallback: number, min: number, max: number): num
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
-function VerticalSplitter({ label, value, min, max, direction, onChange }: { label: string; value: number; min: number; max: number; direction: 1 | -1; onChange: (value: number) => void }) {
+function VerticalSplitter({ label, value, min, max, direction, onReset, onChange }: { label: string; value: number; min: number; max: number; direction: 1 | -1; onReset?: () => void; onChange: (value: number) => void }) {
   const drag = useRef<{ id: number; x: number; value: number } | null>(null);
+  // 拖拽中状态只用于视觉反馈（轨道变 accent 实心），不参与尺寸计算。
+  const [dragging, setDragging] = useState(false);
   const apply = useCallback((next: number) => onChange(Math.min(max, Math.max(min, next))), [max, min, onChange]);
 
   // Electron 有时不会把 pointer capture 后的 move 回送到 React 合成事件；
@@ -52,6 +54,7 @@ function VerticalSplitter({ label, value, min, max, direction, onChange }: { lab
     const finish = (event: globalThis.PointerEvent) => {
       if (drag.current?.id !== event.pointerId) return;
       drag.current = null;
+      setDragging(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -69,21 +72,23 @@ function VerticalSplitter({ label, value, min, max, direction, onChange }: { lab
     if (event.button !== 0) return;
     event.preventDefault();
     drag.current = { id: event.pointerId, x: event.clientX, value };
+    setDragging(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   };
-  return <div role="separator" aria-orientation="vertical" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} onPointerDown={onPointerDown} onKeyDown={(event) => {
+  return <div role="separator" aria-orientation="vertical" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} data-dragging={dragging} title={onReset ? `${label}（双击复位）` : label} onPointerDown={onPointerDown} onDoubleClick={onReset} onKeyDown={(event) => {
     if (event.key === "ArrowLeft") { event.preventDefault(); apply(value - direction * 16); }
     if (event.key === "ArrowRight") { event.preventDefault(); apply(value + direction * 16); }
     if (event.key === "Home") { event.preventDefault(); apply(min); }
     if (event.key === "End") { event.preventDefault(); apply(max); }
-  }} className="group relative hidden w-3 shrink-0 cursor-col-resize touch-none outline-none min-[760px]:block">
-    <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-all group-hover:w-1 group-hover:bg-selected-strong group-focus:w-1 group-focus:bg-selected-strong" />
+  }} className="wb-splitter wb-splitter-v hidden min-[760px]:block">
+    <span className="wb-splitter-track" />
   </div>;
 }
 
-function HorizontalSplitter({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+function HorizontalSplitter({ label, value, min, max, onReset, onChange }: { label: string; value: number; min: number; max: number; onReset?: () => void; onChange: (value: number) => void }) {
   const drag = useRef<{ id: number; y: number; value: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
   const apply = useCallback((next: number) => onChange(Math.min(max, Math.max(min, next))), [max, min, onChange]);
   useEffect(() => {
     const move = (event: globalThis.PointerEvent) => {
@@ -93,6 +98,7 @@ function HorizontalSplitter({ label, value, min, max, onChange }: { label: strin
     const finish = (event: globalThis.PointerEvent) => {
       if (drag.current?.id !== event.pointerId) return;
       drag.current = null;
+      setDragging(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -109,16 +115,17 @@ function HorizontalSplitter({ label, value, min, max, onChange }: { label: strin
     if (event.button !== 0) return;
     event.preventDefault();
     drag.current = { id: event.pointerId, y: event.clientY, value };
+    setDragging(true);
     document.body.style.cursor = "row-resize";
     document.body.style.userSelect = "none";
   };
-  return <div role="separator" aria-orientation="horizontal" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} onPointerDown={onPointerDown} onKeyDown={(event) => {
+  return <div role="separator" aria-orientation="horizontal" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} tabIndex={0} data-dragging={dragging} title={onReset ? `${label}（双击复位）` : label} onPointerDown={onPointerDown} onDoubleClick={onReset} onKeyDown={(event) => {
     if (event.key === "ArrowUp") { event.preventDefault(); apply(value + 16); }
     if (event.key === "ArrowDown") { event.preventDefault(); apply(value - 16); }
     if (event.key === "Home") { event.preventDefault(); apply(min); }
     if (event.key === "End") { event.preventDefault(); apply(max); }
-  }} className="group relative h-3 shrink-0 cursor-row-resize touch-none outline-none">
-    <span className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-line transition-all group-hover:h-1 group-hover:bg-selected-strong group-focus:h-1 group-focus:bg-selected-strong" />
+  }} className="wb-splitter wb-splitter-h">
+    <span className="wb-splitter-track" />
   </div>;
 }
 
@@ -755,7 +762,7 @@ export default function App() {
           onToggleArchived={(id) => void toggleArchived(id)}
         />
         )}
-        {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onChange={setSidebarWidth} />}
+        {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onReset={() => setSidebarWidth(256)} onChange={setSidebarWidth} />}
         <div className="flex min-w-0 min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
             <ChatView

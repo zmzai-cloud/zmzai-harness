@@ -6,14 +6,16 @@ import { Button, cn } from "@zmzai/theme";
 import { client } from "@/lib/client";
 
 type Props = {
-  /** 要在画布中打开的工作区文件路径（相对工作区根）。 */
+  /** 要在成果预览中打开的工作区文件路径（相对工作区根）。 */
   path: string | null;
   onPathChange: (path: string) => void;
   sessionId?: string | null;
 };
 
 /**
- * 画布 Tab：把工作区生成的 HTML 产物在 iframe（srcDoc）中实时渲染。
+ * 成果预览：把工作区生成的 HTML 产物在 iframe（srcDoc）中实时渲染。
+ * 组件名仍为 CanvasPane（内部实现名，spec 明示避免无谓重命名），
+ * 但用户可见文案一律为「成果预览」。
  * HTML 用 srcDoc 隔离渲染（不落临时路由）；其余文本文件回退为代码预览。
  */
 export default function CanvasPane({ path, onPathChange, sessionId }: Props) {
@@ -97,7 +99,7 @@ export default function CanvasPane({ path, onPathChange, sessionId }: Props) {
       </div>
       {isHtml ? (
         <iframe
-          title="画布预览"
+          title="成果预览"
           srcDoc={content ?? ""}
           sandbox="allow-scripts"
           className="min-h-0 flex-1 border-0 bg-white"

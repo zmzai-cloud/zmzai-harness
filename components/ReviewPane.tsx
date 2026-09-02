@@ -79,7 +79,7 @@ export default function ReviewPane({ editedPaths = [], sessionId }: { editedPath
   const files = data?.files ?? [];
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
+      <div className="wb-bar-sm">
         {selected ? (
           <>
             <button
