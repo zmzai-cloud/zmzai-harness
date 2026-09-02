@@ -6,6 +6,16 @@
 
 首期只服务当前电脑上的项目与 session worktree：用户能审查本轮变更、看到确切运行过的验证命令、查看浏览器 QA 截图与错误，并决定接受、退回或丢弃结果。它不尝试实现云端 Agent、跨设备同步、定时任务或完整 VS Code 终端复刻。
 
+### 产品北极星：好用，也省 token
+
+Lectern 的最终目标不是把所有开发活动复制进聊天，而是让用户以更少的操作、让 Agent 以更少的上下文完成更可靠的交付。每一项自动化必须同时回答两个问题：它是否显著减少用户决策成本？它是否只在能改变下一步行动时才消耗 token？两者有任一答案是否定，就不应进入默认路径。
+
+- **证据先结构化，模型后参与**：退出码、diff、变更摘要、浏览器错误、截图元数据由本地系统直接判定；模型只得到用于修复的最小脱敏证据包，不能反复阅读全量日志、整个文件树或历史聊天。
+- **上下文按需、按层展开**：默认向 Agent 提供任务目标、当前 attempt、变更 diff 与失败摘要；只有模型明确请求且权限允许时才逐层取相关文件、日志片段或截图。重复工具结果、未变化的 Git 状态和已确认的配置不得二次注入。
+- **本地复用优先**：复用同一可信 session/worktree 的活跃服务、结构化命令结果和 artifact 引用；不因切换 Review/Preview/Debug Area 重跑命令、重启服务或重新让模型总结相同事实。
+- **默认有预算与止损**：自动浏览器 QA 仅对适用 target 执行；自动修复仅一次；日志、截图和 repair payload 都有硬上限。超预算、证据不充分或连续失败时停下并把下一步交给用户，而不是继续盲试。
+- **人先于模型**：用户看的是一页可行动的证据，而不是模型思考过程；“请求修改”应传递精确 hunk/反馈，而非把整个任务重新塞回上下文。
+
 ## 已定决策
 
 1. 目标范围是**本地可信交付**，不是先做云端/自动化平台。
@@ -14,6 +24,7 @@
 4. 第一优先级的终端增强是任务级验证记录，不是 split、查找或拖拽路径等人工终端细节。
 5. 自动 QA 首次失败时，Agent 获得结构化失败证据并自动尝试修复一次；第二次失败即停止，交付状态为 `verification_failed`。
 6. 审查页是交付决策页：变更、验证证据、截图和接受/退回/丢弃动作在同一任务边界内呈现。
+7. 默认模型上下文采用最小证据包：`task intent + active attempt + changed diff + structured failure summary`；全量输出、截图和无关历史只能按需引用，不能自动反复注入。
 
 ## 非目标
 
@@ -22,6 +33,7 @@
 - 第一阶段内实现完整 VS Code 终端功能集。
 - 让 Agent 猜测任意项目的启动命令；未知项目只做静态产物检查。
 - 用聊天文本或临时浏览器状态作为验证、服务或交付状态的唯一来源。
+- 为了“看起来聪明”而反复发送相同日志、未变化状态、全量文件树或完整会话给模型。
 
 ## 核心原则
 
@@ -46,6 +58,10 @@ type DeliveryOwner = {
 ### 默认自动化必须有限制
 
 自动启动服务只允许来源明确的项目声明；自动修复最多一次；已存在的用户服务只可观察和链接，不可停止或改写。
+
+### Token 成本是可观测的产品约束
+
+每个 attempt 记录本地可得的 `contextBytes`、自动 repair 次数、去重命中数和模型调用的输入/输出 token（模型或 provider 未提供精确 token 时标为 unknown，不能伪造统计）。这些数据只用于本机产品指标与用户可见的运行摘要；不得用它们重新拼接聊天上下文。任何自动 repair payload 必须由 `lib/delivery.ts` 构造为版本化 `EvidencePacket`，字段固定为：任务意图、attempt id、验证快照指纹、相关 diff、脱敏错误摘要、最多 N 行相关命令尾部输出和 artifact 引用。它不含完整会话、完整 stdout/stderr、无关文件或截图二进制。
 
 ## 交付模型
 
@@ -320,6 +336,7 @@ Review 成为 task delivery 的主入口：
 | 模块 | 职责 |
 | --- | --- |
 | `lib/delivery.ts` | attempt/snapshot 状态转换、服务端 owner 推导、合并 CAS、数据库读写与交付摘要纯函数 |
+| `lib/evidence-packet.ts` | 以固定 schema 构造、去重和限额自动 repair 上下文；仅输出相关 diff、脱敏摘要、命令尾部和 artifact 引用 |
 | `lib/command-runs.ts` | 结构化命令执行、脱敏限额输出、退出事件与新 attempt 重跑 |
 | `lib/preview-services.ts` | 已批准声明解析、端口 reservation、租约、进程身份校验、owner-safe 复用/停止与崩溃恢复 |
 | `lib/browser-qa.ts` | 严格 loopback 请求拦截、受控浏览器、错误归类、1440×900 截图写入 artifact store |
@@ -344,6 +361,7 @@ Review 成为 task delivery 的主入口：
 - 服务测试覆盖过期租约、stale registry、PID 重用、并发端口分配、release-then-spawn 的 `EADDRINUSE` 有限重试、启动中取消、丢弃/关闭 session 清理与崩溃恢复。
 - artifact API 拒绝路径遍历、foreign session id、错误 MIME、缺失文件和未授权截图；secret 出现在 stdout/stderr/console/error 时均在存储、读取和 Agent repair payload 前脱敏，超量输出保留截断元数据。
 - 自动修复仅重试一次；二次失败持久化为 `verification_failed`。
+- `EvidencePacket` 只包含固定最小字段和相关尾部输出；同一 snapshot 的重复工具结果、未变化 Git 状态和同一 artifact 不得重复注入。全量日志、完整会话、全文件树、截图二进制与未授权文件不能进入自动 repair payload。
 
 ### 浏览器集成
 
@@ -386,3 +404,4 @@ Review 成为 task delivery 的主入口：
 - 自动 QA 首次失败、一次修复后通过、二次失败的比例。
 - worktree/session 交叉污染事件必须为零。
 - `ready_for_review` 交付中带至少一条结构化验证证据的比例。
+- 每个成功/失败 attempt 的中位模型输入 token、重复上下文节省 token、自动 repair token 与“无需模型即可完成验证”的比例；按项目和模型本地展示，不上传为云端分析。
