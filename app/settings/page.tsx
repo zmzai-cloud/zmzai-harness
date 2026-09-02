@@ -8,25 +8,35 @@ import AccountBlock from "@/components/AccountBlock";
 import ThemeToggle from "@/components/ThemeToggle";
 import { client } from "@/lib/client";
 import { readPref, writePref } from "@/lib/prefs";
-import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo } from "@/lib/types";
+import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo, SkillOption } from "@/lib/types";
 
 /**
  * 设置中心（独立页，替代旧版弹窗）：左侧导航 + 右侧分区内容。
  * 通用（外观、relay 服务端点）/ Agent 与权限 / 权限日志 /
- * 模型与凭据（个人 key、轮换、本地 Ollama）/ MCP 服务 / 插件。
+ * 模型与凭据（个人 key、轮换、本地 Ollama）/ 插件组（MCP、插件、技能）。
  * 所有修改保存即生效，无需重启。
  */
 
-type SectionId = "general" | "agent" | "audit" | "credentials" | "mcp" | "plugins";
+type SectionId = "general" | "agent" | "audit" | "credentials" | "mcp" | "plugins" | "skills";
 
-const NAV: { id: SectionId; label: string }[] = [
+const PRIMARY_NAV: { id: SectionId; label: string }[] = [
   { id: "general", label: "通用" },
   { id: "agent", label: "Agent 与权限" },
   { id: "audit", label: "权限日志" },
   { id: "credentials", label: "模型与凭据" },
-  { id: "mcp", label: "MCP 服务" },
-  { id: "plugins", label: "插件" },
 ];
+
+const EXTENSION_NAV: { id: Extract<SectionId, "mcp" | "plugins" | "skills">; label: string }[] = [
+  { id: "mcp", label: "MCP" },
+  { id: "plugins", label: "插件" },
+  { id: "skills", label: "技能" },
+];
+
+const SKILL_SOURCE: Record<SkillOption["source"], { label: string; detail: string }> = {
+  workspace: { label: "工作区", detail: ".zmzai/skills" },
+  codex: { label: "Codex", detail: "~/.codex/skills" },
+  agents: { label: "本机 Agent", detail: "~/.agents/skills" },
+};
 
 /** 分区标题 + 卡片容器（Qoder 式设置分组）。 */
 function Card({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
@@ -174,6 +184,9 @@ export default function SettingsPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [pluginDraft, setPluginDraft] = useState("");
   const [pluginBusy, setPluginBusy] = useState(false);
+  // ===== Skills（工作区 + 已安装的本机 Codex/Agent 技能，只读发现） =====
+  const [skills, setSkills] = useState<SkillOption[]>([]);
+  const [skillsBusy, setSkillsBusy] = useState(false);
   // ===== relay 账号联动 =====
   const [relayKeys, setRelayKeys] = useState<RelayKeyInfo | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -190,6 +203,7 @@ export default function SettingsPage() {
     }).catch(() => undefined);
     void client.mcpStatus().then(setMcp).catch(() => undefined);
     void client.pluginsList().then((r) => setPlugins(r.plugins)).catch(() => undefined);
+    void client.listSkills().then((r) => setSkills(r.skills)).catch(() => undefined);
     void client.permissionsGet().then(setPerm).catch(() => undefined);
     refreshRelayKeys();
   }, [refreshRelayKeys]);
@@ -284,6 +298,16 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const refreshSkills = () =>
+    void run(async () => {
+      setSkillsBusy(true);
+      try {
+        setSkills((await client.listSkills()).skills);
+      } finally {
+        setSkillsBusy(false);
+      }
+    });
+
   const installPlugin = () =>
     void run(async () => {
       const sourcePath = pluginDraft.trim();
@@ -352,8 +376,9 @@ export default function SettingsPage() {
         {/* 左侧导航（Qoder 式设置中心，可收起） */}
         {navOpen && (
         <aside className="flex w-56 shrink-0 flex-col border-r border-line p-3">
-          <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-            {NAV.map((item) => (
+          <nav className="min-h-0 flex-1 overflow-y-auto">
+            <div className="space-y-0.5">
+            {PRIMARY_NAV.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -366,6 +391,28 @@ export default function SettingsPage() {
                 {item.label}
               </button>
             ))}
+            </div>
+            <div className="mt-5">
+              <div className="px-2.5 pb-1 text-[0.6875rem] font-medium text-ink-3">插件</div>
+              <div className="space-y-0.5">
+                {EXTENSION_NAV.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSection(item.id)}
+                    className={
+                      "flex w-full items-center rounded-sm py-1.5 pr-2.5 pl-5 text-left text-[0.8125rem] transition-colors " +
+                      (section === item.id ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-3")
+                    }
+                  >
+                    <span className="min-w-0 flex-1">{item.label}</span>
+                    {item.id === "mcp" && mcp && <span className="font-mono text-[0.625rem] text-ink-3">{mcp.statuses.length}</span>}
+                    {item.id === "plugins" && <span className="font-mono text-[0.625rem] text-ink-3">{plugins.length}</span>}
+                    {item.id === "skills" && <span className="font-mono text-[0.625rem] text-ink-3">{skills.length}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
           </nav>
 
           {/* 底部账户块独立锚定：导航增长时只滚导航，账户始终贴住侧栏底部。 */}
@@ -636,6 +683,47 @@ export default function SettingsPage() {
                     安装
                   </Button>
                 </div>
+              </Card>
+            )}
+
+            {section === "skills" && (
+              <Card
+                title="技能"
+                desc="Lectern 会默认只读发现工作区和电脑里已有的 Skills。它们会出现在任务输入框的 Skill 选择器中；只有你选中某一个后，正文才会随这条消息注入，避免把整台电脑的技能一次塞进上下文。"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-sm bg-bg px-3 py-2">
+                  <span className="text-[0.6875rem] leading-5 text-ink-3">默认关联：.zmzai/skills、~/.codex/skills、~/.agents/skills</span>
+                  <button
+                    type="button"
+                    disabled={skillsBusy}
+                    onClick={refreshSkills}
+                    className="shrink-0 text-[0.6875rem] text-ink-3 transition-colors hover:text-ink disabled:opacity-50"
+                  >
+                    {skillsBusy ? "扫描中…" : "重新扫描"}
+                  </button>
+                </div>
+                {skills.length > 0 ? (
+                  <div className="overflow-hidden rounded-sm border border-line">
+                    {skills.map((skill, index) => {
+                      const source = SKILL_SOURCE[skill.source];
+                      return (
+                        <div key={skill.id} className={"flex items-center gap-3 bg-surface px-3 py-2.5 " + (index > 0 ? "border-t border-line" : "")}>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-ink">{skill.name}</div>
+                            {skill.description && <div className="mt-0.5 truncate text-[0.6875rem] text-ink-3">{skill.description}</div>}
+                          </div>
+                          <span className="shrink-0 rounded-sm bg-surface-2 px-1.5 py-0.5 text-[0.625rem] text-ink-2" title={source.detail}>
+                            {source.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-sm bg-bg px-3 py-5 text-center text-xs leading-5 text-ink-3">
+                    尚未发现 Skill。可在任一关联目录内放置 &lt;名称&gt;/SKILL.md 后重新扫描。
+                  </div>
+                )}
               </Card>
             )}
           </div>

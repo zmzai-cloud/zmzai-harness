@@ -186,7 +186,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   const VISION_UNSAFE = /^(deepseek|o3-mini|gpt-4o-mini)/i;
   const currentModelId = selectedModel?.modelId ?? "deepseek-v4-flash";
 
-  const submit = useCallback(() => {
+  const submit = useCallback(async () => {
     const body = text.trim();
     // 无会话也可发送（page.send 会自动建会话）
     if (!body && images.length === 0) return;
@@ -196,7 +196,14 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     }
     let full = body || "（见附件图片）";
     if (skill) {
-      full += `\n\n---\n\n<skill name="${skill.name}">\n${skill.markdown}\n</skill>`;
+      try {
+        const { skill: loaded } = await client.getSkill(skill.id);
+        if (!loaded.markdown) throw new Error("Skill 内容为空");
+        full += `\n\n---\n\n<skill name="${loaded.name}">\n${loaded.markdown}\n</skill>`;
+      } catch (err) {
+        setImgNotice(err instanceof Error ? `无法读取 Skill：${err.message}` : "无法读取选中的 Skill");
+        return;
+      }
     }
     // @ 引用的文件收集为上下文提示（agent 有 fs 工具，按路径自行读取）
     const refs = [...body.matchAll(/(^|\s)@([^\s@]+)/g)].map((m) => m[2]);
@@ -451,7 +458,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       {popup === "skill" && (
         <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">
-            Skill · 注入本次 prompt（.zmzai/skills）
+            Skill · 注入本次 prompt（工作区与本机已关联技能）
           </div>
           {skills.map((s) => (
             <button
@@ -464,12 +471,15 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
               className="block w-full rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface-3"
             >
               <span className="text-xs font-medium text-ink">{s.name}</span>
+              <span className="ml-1.5 rounded-sm bg-surface-2 px-1 py-0.5 text-[0.5625rem] text-ink-3">
+                {s.source === "workspace" ? "工作区" : s.source === "codex" ? "Codex" : "本机 Agent"}
+              </span>
               {s.description && <span className="mt-0.5 block text-[0.6875rem] leading-4 text-ink-3">{s.description}</span>}
             </button>
           ))}
           {skills.length === 0 && (
             <div className="px-2 py-3 text-xs leading-5 text-ink-3">
-              工作区还没有技能：在 .zmzai/skills/&lt;name&gt;/SKILL.md 放置技能定义。
+              没有发现 Skill。可放在 .zmzai/skills/&lt;name&gt;/SKILL.md，或安装到 ~/.codex/skills、~/.agents/skills。
             </div>
           )}
         </div>

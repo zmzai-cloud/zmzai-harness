@@ -187,7 +187,9 @@ export type ModelsState = {
   failover: { from?: string; to: string; error: string; attempt: number }[];
 };
 
-export type SkillOption = { id: string; name: string; description?: string; markdown: string };
+/** 本机 / 工作区可发现的 Skill。列表不下发正文，选中时才按 id 读取。 */
+export type SkillSource = "workspace" | "codex" | "agents";
+export type SkillOption = { id: string; name: string; description?: string; source: SkillSource; markdown?: string };
 
 /** 会话上下文用量：取最近一次 step-finish 的 input+output+cacheRead ≈ 窗口占用。 */
 export type UsageInfo = {

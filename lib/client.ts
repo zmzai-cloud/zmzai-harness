@@ -187,6 +187,9 @@ export const client = {
 
   listSkills: () => fetch("/api/skills").then((r) => j<{ skills: SkillOption[] }>(r)),
 
+  getSkill: (id: string) =>
+    fetch(`/api/skills?id=${encodeURIComponent(id)}`).then((r) => j<{ skill: SkillOption }>(r)),
+
   usage: (sessionId: string) =>
     fetch(`/api/sessions/${sessionId}/usage`).then((r) => j<UsageInfo>(r)),
 
