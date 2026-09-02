@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cn } from "@zmzai/theme";
+import { Markdown, cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
 import { isPreviewable } from "@/lib/task-presentation";
@@ -52,31 +52,11 @@ type FileTab = { path: string; content: string; size: number };
 
 const MAX_FILE_TABS = 8;
 
-/** 带行号的纯文本预览（F3：path:line 锚点滚动定位）。 */
-function NumberedPreview({ content, anchorLine }: { content: string; anchorLine?: number }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const lines = content.split("\n");
-  useEffect(() => {
-    if (!anchorLine || !ref.current) return;
-    ref.current.querySelector(`[data-line="${anchorLine}"]`)?.scrollIntoView({ block: "center" });
-  }, [anchorLine, content]);
-  return (
-    <div ref={ref} className="min-h-0 flex-1 overflow-auto py-1">
-      {lines.map((l, i) => (
-        <div
-          key={i}
-          data-line={i + 1}
-          className={cn("flex px-2 font-mono text-xs leading-5", anchorLine === i + 1 && "bg-warning-tint")}
-        >
-          <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-3">{i + 1}</span>
-          <span className="whitespace-pre-wrap break-all text-ink-2">{l || " "}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 const FILE_TREE_WIDTH_KEY = "lectern:file-tree-width";
+
+function isMarkdown(path: string): boolean {
+  return /\.mdx?$/i.test(path);
+}
 
 /**
  * 产物侧工作台（VS Code 风格）：
@@ -104,7 +84,9 @@ export default function WorkbenchPanel({
   const [tab, setTab] = useState<Tab>("review");
   const [fileTabs, setFileTabs] = useState<FileTab[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [fileView, setFileView] = useState<"source" | "preview">("source");
+  /** 未保存草稿留在 WorkbenchPanel：切 tab / 切 Markdown 预览都不丢。 */
+  const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({});
   const [canvasPath, setCanvasPath] = useState<string | null>(null);
   // 用户手动离开的那条 preview 产物路径（而非「永久锁定」）：只抑制同一条产物
   // 的重复推荐，新一轮 run 产生的新 HTML 产物仍可自动推荐。跨会话由组件 key 重置。
@@ -161,6 +143,8 @@ export default function WorkbenchPanel({
   };
 
   const activeFile = fileTabs.find((t) => t.path === activePath) ?? null;
+  const activeContent = activeFile ? fileDrafts[activeFile.path] ?? activeFile.content : "";
+  const activeDirty = activeFile ? activeContent !== activeFile.content : false;
 
   // 外部联动：打开指定文件（切到文件 Tab、LRU 入栈并激活；line 用于锚点滚动）
   const [anchorLine, setAnchorLine] = useState<number | undefined>(undefined);
@@ -169,7 +153,7 @@ export default function WorkbenchPanel({
     // 用户主动打开文件（消息内路径点击 / 文件树 / ⌘P）→ 视为显式选择
     userChoseTab.current = true;
     setTab("files");
-    setEditing(false);
+    setFileView(isMarkdown(path) && !line ? "preview" : "source");
     setAnchorLine(line);
     setActivePath(path);
     // 用户主动打开文件时，抑制当前 preview 产物再抢焦点（用户想看的是文件）
@@ -220,10 +204,17 @@ export default function WorkbenchPanel({
   }, [openRequest, openFile]);
 
   const closeTab = (path: string) => {
+    const tabToClose = fileTabs.find((t) => t.path === path);
+    const draft = tabToClose ? fileDrafts[path] : undefined;
+    if (tabToClose && draft != null && draft !== tabToClose.content && !window.confirm(`“${path.split("/").pop()}”有未保存的修改，仍要关闭吗？`)) return;
     setFileTabs((prev) => {
       const idx = prev.findIndex((t) => t.path === path);
       const next = prev.filter((t) => t.path !== path);
       if (path === activePath) setActivePath(next[Math.min(idx, next.length - 1)]?.path ?? null);
+      return next;
+    });
+    setFileDrafts((prev) => {
+      const { [path]: _discarded, ...next } = prev;
       return next;
     });
   };
@@ -236,10 +227,18 @@ export default function WorkbenchPanel({
       suppressedPreviewPath.current = canvasPath;
     }
     setTab(t);
-    setEditing(false);
   };
 
   const activeIsHtml = activeFile ? isPreviewable(activeFile.path) : false;
+  const activeIsMarkdown = activeFile ? isMarkdown(activeFile.path) : false;
+
+  const saveDraft = (path: string, content: string, size: number) => {
+    setFileTabs((prev) => prev.map((file) => (file.path === path ? { ...file, content, size } : file)));
+    setFileDrafts((prev) => {
+      const { [path]: _saved, ...next } = prev;
+      return next;
+    });
+  };
 
   // 预览/编辑区：根据 active tab 决定渲染内容
   const renderPreview = () => {
@@ -254,7 +253,7 @@ export default function WorkbenchPanel({
                     type="button"
                     onClick={() => {
                       setActivePath(t.path);
-                      setEditing(false);
+                      setFileView(isMarkdown(t.path) ? "preview" : "source");
                       setAnchorLine(undefined);
                     }}
                     title={t.path}
@@ -263,6 +262,9 @@ export default function WorkbenchPanel({
                       t.path === activePath ? "bg-selected text-ink" : "text-ink-3 hover:bg-surface-3 hover:text-ink",
                     )}
                   >
+                    {fileDrafts[t.path] != null && fileDrafts[t.path] !== t.content && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-label="未保存" />
+                    )}
                     <span className="truncate">{t.path.split("/").pop()}</span>
                     <span
                       role="button"
@@ -286,16 +288,32 @@ export default function WorkbenchPanel({
                 <span className="ml-auto shrink-0 text-[0.625rem] text-ink-3">
                   {activeFile.size < 1024 ? `${activeFile.size}B` : `${Math.round(activeFile.size / 1024)}KB`}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setEditing((v) => !v)}
-                  className={cn(
-                    "shrink-0 rounded-pill px-2 py-0.5 text-[0.625rem] font-medium transition-colors",
-                    editing ? "bg-selected text-ink hover:bg-selected-strong" : "bg-surface-2 text-ink-2 hover:text-ink",
-                  )}
-                >
-                  {editing ? "预览" : "编辑"}
-                </button>
+                {activeIsMarkdown && (
+                  <div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-line pl-1">
+                    <button
+                      type="button"
+                      aria-pressed={fileView === "preview"}
+                      onClick={() => setFileView("preview")}
+                      className={cn(
+                        "rounded-[3px] px-1.5 py-0.5 text-[0.625rem] font-medium transition-colors",
+                        fileView === "preview" ? "bg-selected text-ink" : "text-ink-3 hover:bg-surface-2 hover:text-ink",
+                      )}
+                    >
+                      预览
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={fileView === "source"}
+                      onClick={() => setFileView("source")}
+                      className={cn(
+                        "rounded-[3px] px-1.5 py-0.5 text-[0.625rem] font-medium transition-colors",
+                        fileView === "source" ? "bg-selected text-ink" : "text-ink-3 hover:bg-surface-2 hover:text-ink",
+                      )}
+                    >
+                      源代码
+                    </button>
+                  </div>
+                )}
                 {activeIsHtml && (
                   <button
                     type="button"
@@ -309,15 +327,27 @@ export default function WorkbenchPanel({
                   </button>
                 )}
               </div>
-              {editing ? (
+              {activeIsMarkdown && fileView === "preview" ? (
+                <div className="min-h-0 flex-1 overflow-y-auto bg-bg px-5 py-4">
+                  <div className="mx-auto max-w-3xl pb-8">
+                    <Markdown text={activeContent} />
+                  </div>
+                </div>
+              ) : (
                 <FileEditor
                   key={activeFile.path}
                   path={activeFile.path}
-                  initialContent={activeFile.content}
-                  onSaved={() => openFile(activeFile.path)}
+                  anchorLine={anchorLine}
+                  value={activeContent}
+                  savedContent={activeFile.content}
+                  sessionId={sessionId}
+                  onChange={(content) => setFileDrafts((prev) => ({ ...prev, [activeFile.path]: content }))}
+                  onSaved={(content, size) => saveDraft(activeFile.path, content, size)}
+                  onDiscard={() => setFileDrafts((prev) => {
+                    const { [activeFile.path]: _discarded, ...next } = prev;
+                    return next;
+                  })}
                 />
-              ) : (
-                <NumberedPreview content={activeFile.content} anchorLine={anchorLine} />
               )}
             </div>
           ) : (
