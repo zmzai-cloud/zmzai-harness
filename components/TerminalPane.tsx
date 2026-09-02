@@ -524,7 +524,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   <span className="max-w-36 truncate">{s.name}</span>
                 </button>
-                <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1 hidden h-4.5 w-4.5 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] hover:bg-white/10 hover:text-white group-hover:flex focus:flex focus-visible:outline-none">
+                <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1 flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] opacity-0 hover:bg-white/10 hover:text-white group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none">
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
                 </button>
               </div>
