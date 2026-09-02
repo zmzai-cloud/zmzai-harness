@@ -35,10 +35,12 @@ type Props = {
   /** N6 置顶/归档（服务端持久化，父组件即时反馈）。 */
   onTogglePinned: (id: string) => void;
   onToggleArchived: (id: string) => void;
+  /** 后台会话动态（P2-15 续）：id → 结束态。非激活会话结束时列表出徽标，点击清除。 */
+  activity?: Record<string, { kind: string; at: number }>;
   width?: number;
 };
 
-export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession, onTogglePinned, onToggleArchived, width }: Props) {
+export default function SessionList({ sessions, activeId, top, bottom, onNewSession, canCreate, isolateNew, onToggleIsolateNew, onSelectSession, onRenameSession, onDeleteSession, onTogglePinned, onToggleArchived, activity, width }: Props) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -164,6 +166,8 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
           )}
           {filtered.map((s) => {
             const renaming = editingId === s.id;
+            const bgActivity = activity?.[s.id] ?? null;
+            const bgLabel = bgActivity ? { completed: "已完成", aborted: "已中断", error: "已失败" }[bgActivity.kind] ?? "已结束" : "";
             return (
               <div
                 key={s.id}
@@ -204,6 +208,14 @@ export default function SessionList({ sessions, activeId, top, bottom, onNewSess
                         </svg>
                       )}
                       <span className="truncate">{s.title || "未命名会话"}</span>
+                      {bgActivity && (
+                        <span
+                          title={`后台任务${bgLabel}`}
+                          className="ml-0.5 inline-flex h-3.5 shrink-0 items-center rounded-full bg-accent px-1 font-mono text-[0.5625rem] leading-none text-accent-ink"
+                        >
+                          新
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0 font-mono text-[0.625rem] text-ink-3 group-hover:invisible">
                       {timeLabel(s.time.updated ?? s.time.created)}

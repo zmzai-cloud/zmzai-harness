@@ -130,6 +130,37 @@ function PaletteBridge({ bridge, action }: { bridge: React.RefObject<{ newSessio
   return null;
 }
 
+/** N6 完成提示音：短促双音 beep（Web Audio，无需资源文件），静默失败不阻塞。
+ *  调用方负责时机判断（仅 document.hidden / 后台会话时播放，前台不打扰）。 */
+function playDoneChime(): void {
+  try {
+    const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const play = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    play(880, 0, 0.15);
+    play(1174.66, 0.15, 0.2);
+    setTimeout(() => void ctx.close(), 600);
+  } catch {
+    /* 提示音失败静默跳过 */
+  }
+}
+
+/** 后台会话动态：多会话并行时（配合 worktree 隔离），非激活会话结束即在此登记，
+ *  列表出徽标 + 隐藏窗口时系统通知/提示音；点击该会话清除。 */
+type BackgroundActivity = Record<string, { kind: string; at: number }>;
+
 export default function App() {
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
@@ -145,6 +176,10 @@ export default function App() {
   const [echo, setEcho] = useState<{ text: string; images: { url: string; mediaType: string }[] } | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
+  // 后台会话动态（P2-15 续）：id → 结束态；点击会话清除
+  const [backgroundActivity, setBackgroundActivity] = useState<BackgroundActivity>({});
+  const activeIdRef = useRef<string | null>(null);
+  const prevRunningRef = useRef<Map<string, boolean>>(new Map());
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   // SSE 连接状态（断线自动重连；offline 时 UI 出手动重试）
   const [connState, setConnState] = useState<ConnectionState>("connected");
@@ -296,9 +331,43 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleBottomPanel]);
 
+  // 后台动态检测（P2-15 续）：非激活会话 running→false 转换即登记（列表徽标 +
+  // 隐藏窗口时通知/提示音）；激活会话的完成提示由 SSE session.status 链路负责。
   useEffect(() => {
-    void client.listSessions().then(setSessions);
-  }, [auth?.loggedIn]);
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  const ingestSessionList = useCallback((next: SessionListItem[]) => {
+    const updates: BackgroundActivity = {};
+    const nowHidden = document.hidden;
+    let ended = 0;
+    for (const s of next) {
+      const was = prevRunningRef.current.get(s.id);
+      prevRunningRef.current.set(s.id, !!s.running);
+      if (was !== true || s.running) continue;
+      if (s.id === activeIdRef.current) continue;
+      updates[s.id] = { kind: s.lastOutcome ?? "completed", at: Date.now() };
+      ended += 1;
+    }
+    if (ended === 0) {
+      setSessions(next);
+      return;
+    }
+    setBackgroundActivity((cur) => ({ ...cur, ...updates }));
+    setSessions(next);
+    if (nowHidden) {
+      const ok = ended === 1 && (Object.values(updates)[0]?.kind ?? "completed") === "completed";
+      const bridge = window.lecternNative;
+      const body = ended === 1 ? `后台任务${ok ? "已完成" : "已结束"}，回来看看结果` : `${ended} 个后台任务已结束`;
+      if (bridge?.notifyTaskDone) bridge.notifyTaskDone();
+      else if ("Notification" in window && Notification.permission === "granted") new Notification("Lectern", { body });
+      playDoneChime();
+    }
+  }, []);
+
+  useEffect(() => {
+    void client.listSessions().then(ingestSessionList);
+  }, [auth?.loggedIn, ingestSessionList]);
 
   // 仅恢复当前项目库中仍存在的上次会话。旧跨项目 pendingSession 不再参与恢复。
   const bootRestoredRef = useRef(false);
@@ -321,6 +390,12 @@ export default function App() {
   }, [activeId]);
 
   const selectSession = useCallback((id: string) => {
+    // 打开后台有动态的会话即清除其徽标
+    setBackgroundActivity((cur) => {
+      if (!(id in cur)) return cur;
+      const { [id]: _drop, ...rest } = cur;
+      return rest;
+    });
     if (id !== activeId) setActiveId(id);
   }, [activeId]);
 
@@ -429,41 +504,15 @@ export default function App() {
       document.title = "✓ 任务完成 — Lectern";
       // 前台 toast：轻提示，4s 自动消退
       setDoneToast("任务已完成");
-      const timer = setTimeout(() => setDoneToast(null), 4000);
+      setTimeout(() => setDoneToast(null), 4000);
       const bridge = window.lecternNative;
       if (document.hidden && bridge?.notifyTaskDone) {
         bridge.notifyTaskDone();
       } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {
         new Notification("Lectern", { body: "任务已完成，回来看看结果" });
       }
-      // N6 完成提示音：短促双音 beep（Web Audio，无需资源文件），静默失败不阻塞。
-      // 只在后台窗口时播放——前台已弹 toast，避免打扰。
-      if (document.hidden) {
-        try {
-          const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-          if (Ctx) {
-            const ctx = new Ctx();
-            const play = (freq: number, start: number, dur: number) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.type = "sine";
-              osc.frequency.value = freq;
-              gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-              gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + start + 0.02);
-              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
-              osc.connect(gain).connect(ctx.destination);
-              osc.start(ctx.currentTime + start);
-              osc.stop(ctx.currentTime + start + dur);
-            };
-            play(880, 0, 0.15);
-            play(1174.66, 0.15, 0.2);
-            setTimeout(() => void ctx.close(), 600);
-          }
-        } catch {
-          /* 提示音失败静默跳过 */
-        }
-      }
-      return () => clearTimeout(timer);
+      // N6 完成提示音：短促双音 beep，只在后台窗口时播放——前台已弹 toast，避免打扰。
+      if (document.hidden) playDoneChime();
     } else if (status === "running") {
       document.title = "Lectern";
     }
@@ -473,11 +522,12 @@ export default function App() {
   // session.status）。前台 10s，页面隐藏降到 60s 省电省请求。
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
+    const refresh = () => {
+      void client.listSessions().then(ingestSessionList).catch(() => undefined);
+    };
     const start = () => {
       clearInterval(timer);
-      timer = setInterval(() => {
-        void client.listSessions().then(setSessions).catch(() => undefined);
-      }, document.hidden ? 60_000 : 10_000);
+      timer = setInterval(refresh, document.hidden ? 60_000 : 10_000);
     };
     const onVis = () => start();
     document.addEventListener("visibilitychange", onVis);
@@ -486,7 +536,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVis);
       clearInterval(timer);
     };
-  }, []);
+  }, [ingestSessionList]);
 
   const newSession = useCallback(async () => {
     if (!auth?.loggedIn) return;
@@ -678,6 +728,7 @@ export default function App() {
           bottom={<AccountBlock />}
           sessions={sessions}
           activeId={activeId}
+          activity={backgroundActivity}
           onNewSession={() => void newSession()}
           canCreate={!!auth?.loggedIn}
           isolateNew={isolateNew}
