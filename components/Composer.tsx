@@ -24,6 +24,20 @@ function parseAtQuery(value: string, caret: number): string | null {
   return m ? m[2] : null;
 }
 
+/** `/skill` and `/file` are resource commands, not prompt text. */
+function parseSlashQuery(value: string, caret: number): string | null {
+  const m = value.slice(0, caret).match(/(^|\s)\/([^\s/]*)$/);
+  return m ? m[2].toLowerCase() : null;
+}
+
+const SLASH_COMMANDS = [
+  { id: "skill", label: "Skill", description: "引用并强制使用一个 Skill", keywords: ["skill", "技能", "resource"] },
+  { id: "file", label: "文件", description: "引用工作区中的文件或目录", keywords: ["file", "文件", "path"] },
+  // Reserved commands intentionally stay disabled until their behavior is shipped.
+  { id: "mcp", label: "MCP", description: "引用 MCP 资源", keywords: ["mcp"], enabled: false },
+  { id: "model", label: "模型", description: "引用模型配置", keywords: ["model"], enabled: false },
+] as const;
+
 type Props = {
   sessionId: string | null;
   running: boolean;
@@ -60,6 +74,8 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   const [atQuery, setAtQuery] = useState<string | null>(null);
   const [atItems, setAtItems] = useState<FileHit[]>([]);
   const [atIndex, setAtIndex] = useState(0);
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   // 目录列表缓存：同一目录内只读一次，后续敲字符本地过滤（避免每次字符都全量 readdir）
   const atDirCacheRef = useRef<Map<string, TreeNode[]>>(new Map());
   // 取消上一次未完成的目录请求（防止快速输入时请求排队堆积）
@@ -214,7 +230,31 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   const onTextChange = useCallback((value: string, caret: number) => {
     setText(value);
     setAtQuery(parseAtQuery(value, caret));
+    setSlashQuery(parseSlashQuery(value, caret));
+    setSlashIndex(0);
   }, []);
+
+  const slashItems = useMemo(() => {
+    const query = slashQuery ?? "";
+    return SLASH_COMMANDS.filter((item) => (!("enabled" in item && item.enabled === false)) && (!query || item.id.startsWith(query) || item.keywords.some((word) => word.includes(query))));
+  }, [slashQuery]);
+
+  const pickSlash = useCallback((id: typeof SLASH_COMMANDS[number]["id"]) => {
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const before = text.slice(0, caret).replace(/(^|\s)\/[^\s/]*$/, "$1");
+    const after = text.slice(caret);
+    if (id === "skill") {
+      setText(before + after);
+      setPopup("skill");
+    } else if (id === "file") {
+      const next = `${before}@${after}`;
+      setText(next);
+      setAtQuery("");
+      requestAnimationFrame(() => textareaRef.current?.setSelectionRange(before.length + 1, before.length + 1));
+    }
+    setSlashQuery(null);
+  }, [text]);
 
   /** 已知不支持视觉输入的模型前缀（deepseek 官方 API 对 image content 直接 400，
    *  上游报错/挂起表现为会话「卡住」，发送前拦截）。 */
@@ -327,6 +367,19 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
 
   return (
     <div ref={rootRef} className="relative shrink-0 px-6 pb-4">
+      {slashQuery != null && (
+        <div className="absolute bottom-full left-1/2 mb-2 w-full max-w-3xl -translate-x-1/2 overflow-hidden rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
+          <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">命令 · 引用资源</div>
+          {slashItems.map((item, index) => (
+            <button key={item.id} type="button" onMouseEnter={() => setSlashIndex(index)} onClick={() => pickSlash(item.id)} className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left transition-colors", index === slashIndex ? "bg-selected" : "hover:bg-surface-3")}>
+              <span className="font-mono text-xs font-medium text-accent">/{item.id}</span>
+              <span className="text-xs text-ink-3">{item.description}</span>
+            </button>
+          ))}
+          {slashItems.length === 0 && <div className="px-2 py-3 text-xs text-ink-3">没有匹配的命令。</div>}
+          <div className="border-t border-line px-2 pt-1.5 text-[0.625rem] text-ink-3">↑↓ 选择 · ⏎ 确认 · Esc 关闭</div>
+        </div>
+      )}
       {/* @ 文件引用浮层 */}
       {atQuery != null && (
         <div className="absolute bottom-full left-1/2 mb-2 max-h-64 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
@@ -586,6 +639,12 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
           value={text}
           onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={(e) => {
+            if (slashQuery != null && slashItems.length > 0) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setSlashIndex((i) => (i + 1) % slashItems.length); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setSlashIndex((i) => (i - 1 + slashItems.length) % slashItems.length); return; }
+              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickSlash(slashItems[slashIndex]!.id); return; }
+            }
+            if (slashQuery != null && e.key === "Escape") { e.preventDefault(); setSlashQuery(null); return; }
             // @ 浮层打开时优先响应键盘导航
             if (atQuery != null && atItems.length > 0) {
               if (e.key === "ArrowDown") {
