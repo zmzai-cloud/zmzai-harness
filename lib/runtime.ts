@@ -48,7 +48,7 @@ import { dataDir as baseDataDir, defaultWorkspaceRoot } from "./runtime-constant
  * active 项目切换后，cloudRuntime() 与 workspaceRoot（ESM live binding）随之切换。
  */
 
-export { dataDir as harnessDataDir, defaultWorkspaceRoot } from "./runtime-constants";
+export { defaultWorkspaceRoot } from "./runtime-constants";
 export const dataDir = baseDataDir;
 
 /** active 项目的工作区路径（ESM live binding：切换项目时由 switchProject 更新，

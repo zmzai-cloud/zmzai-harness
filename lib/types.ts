@@ -100,16 +100,6 @@ export type TreeNode = {
   mtime: string;
 };
 
-export type GitChange = { x: string; y: string; path: string; origPath?: string };
-
-export type GitStatus = {
-  branch: string | null;
-  ahead: number;
-  behind: number;
-  changes: GitChange[];
-  error?: string;
-};
-
 /** 宿主机探测到的 shell 候选（面板下拉 + 交互会话起哪一个）。 */
 export type ShellCandidate = {
   file: string;

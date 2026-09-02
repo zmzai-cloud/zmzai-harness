@@ -2,7 +2,6 @@ import type {
   AgentInfo,
   AuthStatus,
   GitDiff,
-  GitStatus,
   LecternEvent,
   KeyStatus,
   McpStatuses,
@@ -146,8 +145,6 @@ export const client = {
     fetch(`/api/fs/search?q=${encodeURIComponent(q)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
       j<{ query: string; results: { path: string; type: "dir" | "file" }[] }>(r),
     ),
-
-  gitStatus: () => fetch("/api/git/status").then((r) => j<GitStatus>(r)),
 
   terminalList: (sessionId?: string | null) => fetch(`/api/terminal${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) => j<TerminalListResult>(r)),
 

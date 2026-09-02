@@ -49,12 +49,6 @@ export async function relayGet<T>(path: string, cookie: string | null): Promise<
   }
 }
 
-/** 登录态探测：relay /models 返回 200 即已登录（cookie 有效）。 */
-export async function relayAuthStatus(cookie: string | null): Promise<{ loggedIn: boolean; cookieName: string }> {
-  const data = await relayGet<ModelsResponse>("/models", cookie);
-  return { loggedIn: data !== null, cookieName: sessionCookieName };
-}
-
 /** 当前登录用户 profile（name/email，账户块展示用）；未登录/不可达返回 null。
  *  降级链：relay /api/me/profile（新部署）→ muzhi /api/auth/me（同一 session，
  *  生产 relay 旧版无 profile 端点时旧 404 会导致「登录成功但恒显未登录」）。 */

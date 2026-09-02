@@ -42,7 +42,6 @@ type Props = {
    * 控件由调用方以插槽注入——条本身不认识任何具体控件，保持「只渲染状态」。
    */
   actions?: ReactNode;
-  className?: string;
 };
 
 /** 状态 → 语义色 class。只消费 theme 既有语义 token，不写硬编码色值（§7.3）。 */
@@ -140,7 +139,6 @@ export default function TaskContextStrip({
   summary,
   meta,
   actions,
-  className,
 }: Props) {
   const style = STATE_STYLE[presentation.state];
   const isRunning = presentation.state === "running";
@@ -148,7 +146,7 @@ export default function TaskContextStrip({
   return (
     // 整条不是 live region：任务标题/摘要每次切会话都会变，整条播报太吵。
     // 只有状态徽标是 role="status"，状态变化才播报。
-    <div className={cn("wb-bar gap-2 px-3", className)}>
+    <div className="wb-bar gap-2 px-3">
       {/* 主状态徽标：图标 + 文字（形状与文字都不折叠，颜色只是辅助） */}
       <span
         role="status"
