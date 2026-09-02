@@ -18,7 +18,6 @@ import type {
   SessionIsolation,
   SkillOption,
   TerminalChunk,
-  TerminalReadAllResult,
   TerminalListResult,
   TerminalSession,
   ThinkingEffort,
@@ -167,12 +166,6 @@ export const client = {
 
   terminalRead: (id: string, cursor: number) =>
     fetch(`/api/terminal/${id}/read?cursor=${cursor}`).then((r) => j<TerminalChunk>(r)),
-
-  /** 批量游标读：一次请求拉全部会话增量 + 最新状态（替代逐会话 N 路轮询）。 */
-  terminalReadAll: (cursors: Record<string, number>) =>
-    fetch(`/api/terminal/read-all?cursors=${encodeURIComponent(JSON.stringify(cursors))}`).then((r) =>
-      j<TerminalReadAllResult>(r),
-    ),
 
   terminalInput: (id: string, data: string) =>
     post(`/api/terminal/${id}/input`, { data }).then((r) => j<{ ok: boolean }>(r)),

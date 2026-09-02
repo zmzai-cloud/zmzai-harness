@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
-import type { ShellCandidate } from "@/lib/types";
+import type { ShellCandidate, TerminalReadAllResult } from "@/lib/types";
 import "@xterm/xterm/css/xterm.css";
 
 /** VSCode Dark+ 终端配色。 */
@@ -85,7 +85,9 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
   const activeIdRef = useRef<string | null>(null);
   const defaultShellRef = useRef<ShellCandidate | null>(null);
   const backendRef = useRef<"pty" | "pipe">("pty");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<EventSource | null>(null);
+  /** 关流句柄（重连 timer 清理等）；startStream 赋值，stopStream 调用。 */
+  const streamStopRef = useRef<(() => void) | null>(null);
   const obsRef = useRef<ResizeObserver | null>(null);
   const lineBufRef = useRef(""); // pipe 模式输入缓冲
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,11 +114,9 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
     activeIdRef.current = activeId;
   }, [activeId]);
 
-  const stopPoll = useCallback(() => {
-    if (pollRef.current) {
-      clearTimeout(pollRef.current);
-      pollRef.current = null;
-    }
+  const stopStream = useCallback(() => {
+    streamStopRef.current?.();
+    streamStopRef.current = null;
   }, []);
 
   /**
@@ -208,33 +208,55 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
     if (term) queueResize(id, term.cols, term.rows);
   }, [queueResize]);
 
-  // 轮询循环：单请求批量拉所有会话增量；只有激活会话写 xterm，否则只追加到会话 buffer。
-  // 自适应节奏：有新输出/状态变化 → 300ms；空闲逐级退避到 2s——dev 模式下每请求
-  // 都打一行日志，固定 300ms × N 会话会把 dev 终端刷成瀑布并拖慢交互。
-  const startPoll = useCallback(() => {
-    stopPoll();
-    let delay = 300;
-    const tick = async () => {
-      let nextDelay = 300;
-      let statusChanged = false;
+  // SSE 流替代 HTTP 轮询（治本）：一条 EventSource 长连接，服务端进程内自适应
+  // 检查增量并推送（无请求日志、无 JSON 开销）。断线手动重连——EventSource 的
+  // 自动重连会复用连接时的旧游标导致重复输出，重连必须带最新游标。
+  const startStream = useCallback(() => {
+    stopStream();
+    let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (disposed) return;
       const cursors: Record<string, number> = {};
       for (const s of sessionsRef.current) cursors[s.id] = s.cursor;
-      try {
-        const batch = await client.terminalReadAll(cursors);
+      const es = new EventSource(`/api/terminal/stream?cursors=${encodeURIComponent(JSON.stringify(cursors))}`);
+      streamRef.current = es;
+
+      es.onmessage = (ev) => {
+        let batch: TerminalReadAllResult;
+        try {
+          batch = JSON.parse(ev.data) as TerminalReadAllResult;
+        } catch {
+          return;
+        }
         const active = activeIdRef.current;
+        let statusChanged = false;
+
         for (const chunk of batch.sessions) {
           const s = sessionsRef.current.find((e) => e.id === chunk.id);
-          // 批量响应里出现的未知会话（另一端新建）：补进本地列表
           if (!s) {
-            sessionsRef.current.push({
-              id: chunk.id,
-              name: chunk.name ?? chunk.id,
-              shell: "",
-              status: chunk.status as Sess["status"],
-              cursor: 0,
-              buffer: "",
-            });
-            statusChanged = true;
+            // 流里出现未知会话（另一端新建 / 与 newSession 竞态）：拉历史后补进列表
+            const label = (chunk.name ?? chunk.id).replace(/^lectern:[^:]+:/, "");
+            void client
+              .terminalRead(chunk.id, 0)
+              .catch(() => ({ output: "", cursor: 0 }))
+              .then((c) => {
+                if (sessionsRef.current.some((e) => e.id === chunk.id)) return; // 已被 newSession 等路径加入
+                const seen = new Map<string, number>();
+                for (const e of sessionsRef.current) seen.set(e.shell, (seen.get(e.shell) ?? 0) + 1);
+                const n = (seen.get(label) ?? 0) + 1;
+                const next: Sess = {
+                  id: chunk.id,
+                  name: `${label} ${n}`,
+                  shell: label,
+                  status: (chunk.status as Sess["status"]) ?? "running",
+                  buffer: c.output,
+                  cursor: c.cursor,
+                };
+                sessionsRef.current = [...sessionsRef.current, next];
+                setSessions((prev) => [...prev, next]);
+              });
             continue;
           }
           s.cursor = chunk.cursor;
@@ -251,19 +273,38 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
             }
           }
         }
-        // 只有状态点变化才需要 re-render（buffer/cursor 不影响列表 UI）
+
+        // 会话在服务端消失（达到上限被回收等）：同步移除 tab
+        if (batch.missing.length > 0) {
+          sessionsRef.current = sessionsRef.current.filter((e) => !batch.missing.includes(e.id));
+          statusChanged = true;
+          if (batch.missing.includes(active ?? "")) {
+            const fallback = sessionsRef.current[sessionsRef.current.length - 1] ?? null;
+            setActiveId(fallback ? fallback.id : null);
+          }
+        }
+
+        // 只有状态点/tab 列表变化才需要 re-render（buffer/cursor 不影响列表 UI）
         if (statusChanged) setSessions((prev) => prev.slice());
-        // 本轮任何会话有新输出 → 保持快节奏；全空闲 → 退避
-        const anyOutput = batch.sessions.some((c) => c.output.length > 0);
-        nextDelay = anyOutput || statusChanged ? 300 : Math.min(delay * 2, 2000);
-      } catch {
-        nextDelay = 1000; // 批量读失败：稍作退避重试，不连累整体
-      }
-      delay = nextDelay;
-      pollRef.current = setTimeout(tick, delay);
+      };
+
+      es.onerror = () => {
+        es.close();
+        streamRef.current = null;
+        if (disposed) return;
+        retryTimer = setTimeout(connect, 1000); // 带最新游标重连，无缺口续传
+      };
     };
-    pollRef.current = setTimeout(tick, delay);
-  }, [stopPoll]);
+
+    connect();
+    streamStopRef.current = () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      streamRef.current?.close();
+      streamRef.current = null;
+      streamStopRef.current = null;
+    };
+  }, [stopStream]);
 
   // 挂载：建 xterm + 输入接线 + 自适应 + 拉取/补建会话 + 启动轮询
   useEffect(() => {
@@ -386,7 +427,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
           term.write(
             `\x1b[90m Lectern 终端（管道模式）：无 PTY，交互 shell 不可用，每行回车即执行一条命令\x1b[0m\r\n\x1b[32m$\x1b[0m `,
           );
-          startPoll();
+          startStream();
           return;
         }
 
@@ -438,7 +479,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
         return;
       }
 
-      startPoll();
+      startStream();
     })();
     return () => {
       disposed = true;
@@ -450,7 +491,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
       lastFitRef.current = null;
       // 终端属于当前任务而非 React 组件；右栏收起、会话切换或重载都不应杀掉
       // 用户正在运行的 shell。显式关闭 tab 才会结束对应进程。
-      stopPoll();
+      stopStream();
       termRef.current?.dispose();
       termRef.current = null;
     };
