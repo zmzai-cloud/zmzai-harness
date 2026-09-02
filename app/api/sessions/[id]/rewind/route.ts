@@ -47,6 +47,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     return NextResponse.json({ error: "目标消息不存在或不是用户消息" }, { status: 404 });
   }
   const selectedSkill = target.info.skill;
+  const references = target.info.references;
   const originalText = target.parts
     .filter((p) => p.type === "text")
     .map((p) => p.text)
@@ -82,6 +83,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
         model,
         ...(images.length > 0 ? { images } : {}),
         ...(selectedSkill ? { skill: selectedSkill } : {}),
+        ...(references?.length ? { references } : {}),
       }),
     );
     return NextResponse.json({ ok: true });

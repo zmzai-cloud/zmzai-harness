@@ -81,11 +81,26 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   // 取消上一次未完成的目录请求（防止快速输入时请求排队堆积）
   const atAbortRef = useRef<AbortController | null>(null);
 
-  // 模型目录与技能列表（会话无关，进页面拉一次）
+  // 模型目录全局共享，进页面拉一次。
   useEffect(() => {
     void client.listModels().then(setModels).catch(() => undefined);
-    void client.listSkills(sessionId).then((r) => setSkills(r.skills)).catch(() => undefined);
   }, []);
+
+  // Skill 与 @ 文件都受会话 worktree 约束。切换隔离会话后必须重取，不能继续
+  // 使用上一个工作区的目录缓存或技能清单。
+  useEffect(() => {
+    let disposed = false;
+    atAbortRef.current?.abort();
+    atAbortRef.current = null;
+    atDirCacheRef.current.clear();
+    setAtItems([]);
+    void client.listSkills(sessionId).then((r) => {
+      if (disposed) return;
+      setSkills(r.skills);
+      setSkill((current) => current && !r.skills.some((item) => item.id === current.id) ? null : current);
+    }).catch(() => !disposed && setSkills([]));
+    return () => { disposed = true; };
+  }, [sessionId]);
 
   // @ 引用：按已输入路径懒加载目录，按最后一段过滤。
   // 优化：①目录级缓存（同目录不再重复请求）②150ms debounce（停止输入才请求）
@@ -123,7 +138,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       const controller = new AbortController();
       atAbortRef.current = controller;
       void client
-        .fsTree(dir, undefined, controller.signal)
+        .fsTree(dir, sessionId, controller.signal)
         .then((r) => {
           if (disposed) return;
           atDirCacheRef.current.set(dir, r.nodes);
@@ -139,7 +154,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       disposed = true;
       clearTimeout(timer);
     };
-  }, [atQuery]);
+  }, [atQuery, sessionId]);
 
   // 上下文用量轮询：空闲 6s、运行中 2.5s
   useEffect(() => {
