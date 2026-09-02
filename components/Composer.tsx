@@ -519,6 +519,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         <Textarea
           ref={textareaRef}
           onPaste={onPaste}
+          rows={2}
           className="max-h-44 min-h-[60px] w-full resize-none border-0 bg-transparent px-3.5 py-3 text-sm leading-6 text-ink shadow-none outline-none placeholder:text-ink-3 focus-visible:ring-0"
           value={text}
           onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}

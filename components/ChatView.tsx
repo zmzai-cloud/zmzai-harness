@@ -480,7 +480,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
     }
   }, [messages, pending]);
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       {/* 头部条已移除：「对话 / 空闲 / 自动」等控件按 visual spec §4.2 并入任务
           上下文条（TaskContextStrip，由 page.tsx 渲染在对话区顶部）。此处直接进
           入横幅与消息流，不再有第二根 36px 条。 */}
@@ -537,7 +537,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
         </div>
       )}
       <div
-        className="messages mx-auto w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl flex-1 space-y-7 overflow-y-auto px-6 py-6"
+        className="messages mx-auto min-h-0 w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl flex-1 space-y-7 overflow-y-auto px-6 py-6"
         ref={messagesRef}
         onScroll={(e) => {
           // 触顶自动加载更早历史（hasMore 且未在加载中——防抖在 page 层）
