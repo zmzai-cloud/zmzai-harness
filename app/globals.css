@@ -367,7 +367,8 @@ html.electron header a,
 html.electron header input {
   -webkit-app-region: no-drag;
 }
-/* macOS hiddenInset 红绿灯悬浮在左上角，品牌区让位避免重叠 */
+/* macOS hiddenInset 红绿灯悬浮在左上角，品牌区固定留出 84px 安全带：
+   20px header inset + 64px 三颗控制钮及缓冲，不依赖窗口缩放或 logo 的实际宽度。 */
 html.electron header > div:first-child {
-  padding-left: 68px;
+  padding-left: 84px;
 }
