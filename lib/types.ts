@@ -91,7 +91,7 @@ export type AuthStatus = {
   user?: { name: string; email: string } | null;
 };
 
-// ===== Inspector（文件树 / Git / 终端）=====
+// ===== 文件系统 / Git / 终端（原 Inspector 面板，现由 WorkbenchPanel 承载）=====
 
 export type TreeNode = {
   name: string;

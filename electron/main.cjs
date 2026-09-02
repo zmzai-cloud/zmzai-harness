@@ -279,7 +279,13 @@ app.whenReady().then(async () => {
     const legacy = path.join(path.dirname(userData), "zmzai Harness");
     if (path.resolve(legacy) !== path.resolve(userData) && fs.existsSync(legacy)
         && !fs.existsSync(path.join(userData, "zmzai.db"))) {
-      try { fs.cpSync(legacy, userData, { recursive: true }); } catch {}
+      try {
+        fs.cpSync(legacy, userData, { recursive: true });
+      } catch (e) {
+        // 迁移失败不能阻断启动（应用本身仍可用），但必须留下明确线索：否则用户会
+        // 以为「改名升级后历史会话全部丢失」，而实际上数据仍完整躺在旧目录里。
+        console.error("[migrate] 旧会话库迁移失败，历史数据仍留在:", legacy, e);
+      }
     }
   }
 

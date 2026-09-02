@@ -20,7 +20,12 @@ const themeBootstrap = `
     var t = q === "dark" || q === "light" ? q : localStorage.getItem("zmzai-theme") || "system";
     if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
     if (window.lecternNative) document.documentElement.classList.add("electron");
-  } catch (e) {}
+  } catch (e) {
+    // 隐私模式 / 禁用存储时读 localStorage 会抛异常。主题与桌面壳标记都只是锦上
+    // 添花，绝不能让它阻断首帧渲染，所以这里只告警不抛出——否则「主题不生效」
+    // 会是彻头彻尾的静默失败，无从排查。
+    console.warn("[theme] 首帧主题引导失败，回退到默认主题:", e);
+  }
 })();
 `;
 

@@ -127,7 +127,7 @@ export const client = {
   abort: (sessionId: string) =>
     post(`/api/sessions/${sessionId}/abort`).then((r) => j<{ ok: boolean }>(r)),
 
-  // ===== Inspector =====
+  // ===== 文件系统 / Git / 终端（右侧工作台面板与 ⌘P 快开共用）=====
 
   fsTree: (path: string, sessionId?: string | null, signal?: AbortSignal) =>
     fetch(`/api/fs/tree?path=${encodeURIComponent(path)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal }).then((r) =>
