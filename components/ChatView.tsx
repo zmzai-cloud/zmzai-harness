@@ -480,7 +480,10 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
     }
   }, [messages, pending]);
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-bg">
+      {/* 消息区与 Composer 是两个明确的 grid row：上面只能在自身内部滚动，
+          下面的 Composer 因此不可能越过 Debug Area。 */}
+      <div className="flex min-h-0 flex-col">
       {/* 头部条已移除：「对话 / 空闲 / 自动」等控件按 visual spec §4.2 并入任务
           上下文条（TaskContextStrip，由 page.tsx 渲染在对话区顶部）。此处直接进
           入横幅与消息流，不再有第二根 36px 条。 */}
@@ -810,6 +813,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
             onReply={(reply, feedback) => onReply(reply, feedback)}
           />
         )}
+      </div>
       </div>
       <Composer
         sessionId={sessionId}

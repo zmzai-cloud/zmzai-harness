@@ -853,7 +853,7 @@ export default function App() {
         />
         )}
         {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onReset={() => setSidebarWidth(256)} onChange={setSidebarWidth} />}
-        <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* 任务上下文条（§4.2）：替代原先散落的「对话 / 空闲 / 自动」控件 */}
           <TaskContextStrip
             presentation={presentation}
