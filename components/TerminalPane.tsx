@@ -434,11 +434,11 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
 
   const activeSess = sessions.find((s) => s.id === activeId) ?? null;
   const iconBtn =
-    "flex h-7 w-7 items-center justify-center rounded-[4px] text-[#b8b8bd] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7797e8]";
+    "flex h-6.5 w-6.5 items-center justify-center rounded-[4px] text-[#b8b8bd] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7797e8]";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#1e1e22] text-[#d4d4d4]">
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-white/10 px-2">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-white/10 px-2">
         <span className="px-2 text-[0.6875rem] font-semibold tracking-wide text-[#b8b8bd]">TERMINAL</span>
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="终端">
           {sessions.map((s) => {
@@ -447,18 +447,18 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
               <div
                 key={s.id}
                 className={cn(
-                  "group inline-flex h-8 shrink-0 items-center rounded-[6px] text-[0.8125rem] transition-colors",
+                  "group inline-flex h-6.5 shrink-0 items-center rounded-[5px] text-xs transition-colors",
                   isActive ? "bg-[#2d2d32] text-white" : "text-[#aaaab0] hover:bg-white/5 hover:text-[#e7e7e7]",
                 )}
                 title={s.shellFile ? `${s.name} · ${s.shellFile}` : s.id}
               >
-                <button type="button" role="tab" aria-selected={isActive} onClick={() => switchSession(s.id)} className="inline-flex h-full items-center gap-2 pl-2.5 focus-visible:outline-none">
-                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", s.status === "running" ? "bg-[#23d18b]" : "bg-[#717178]")} />
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  <span className="max-w-44 truncate">{s.name}</span>
+                <button type="button" role="tab" aria-selected={isActive} onClick={() => switchSession(s.id)} className="inline-flex h-full items-center gap-1.5 pl-2 focus-visible:outline-none">
+                  <span className={cn("h-1 w-1 shrink-0 rounded-full", s.status === "running" ? "bg-[#23d18b]" : "bg-[#717178]")} />
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <span className="max-w-36 truncate">{s.name}</span>
                 </button>
-                <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1.5 hidden h-6 w-6 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] hover:bg-white/10 hover:text-white group-hover:flex focus:flex focus-visible:outline-none">
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
+                <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1 hidden h-4.5 w-4.5 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] hover:bg-white/10 hover:text-white group-hover:flex focus:flex focus-visible:outline-none">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
                 </button>
               </div>
             );
@@ -466,7 +466,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
           {backend === "pty" && (
             <div className="relative shrink-0">
               <button type="button" title={`新建终端（${defaultShell?.label ?? "系统 shell"}）`} onClick={() => void newSession()} className={iconBtn}>
-                <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M8 2.5v11M2.5 8h11" strokeLinecap="round" /></svg>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M8 2.5v11M2.5 8h11" strokeLinecap="round" /></svg>
               </button>
               {shells.length > 1 && <button type="button" title="选择 shell" onClick={() => setMenuOpen((v) => !v)} className="absolute -right-1 top-1/2 flex h-4 w-3 -translate-y-1/2 items-center justify-center text-[#aaaab0] hover:text-white"><svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
               {menuOpen && <>
@@ -480,8 +480,8 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
         </div>
         <div className="ml-1 flex shrink-0 items-center border-l border-white/10 pl-1">
           {backend === "pipe" && <span className="px-1 text-[0.625rem] text-[#8f8f95]">管道模式</span>}
-          <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M3 4h10M5.5 4V2.5h5V4M5 6l.6 7h4.8l.6-7" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
-          <button type="button" title="重启当前终端" onClick={() => void (async () => { if (!activeSess) return; await killSession(activeSess.id); await newSession(); })()} className={iconBtn}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+          <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M3 4h10M5.5 4V2.5h5V4M5 6l.6 7h4.8l.6-7" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+          <button type="button" title="重启当前终端" onClick={() => void (async () => { if (!activeSess) return; await killSession(activeSess.id); await newSession(); })()} className={iconBtn}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
         </div>
       </div>
 
