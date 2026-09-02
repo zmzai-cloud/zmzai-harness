@@ -9,12 +9,14 @@ contextBridge.exposeInMainWorld("lecternNative", {
   notifyTaskDone: () => ipcRenderer.send("notify:taskDone"),
 
   /** SSO 登录：打开 auth.zmzai.cloud 子窗口（GitHub OAuth / 邮箱密码）。
-   *  返回已有共享会话 cookie 值或 null；登录完成（cookie 变化）经 onSsoCookie 回调送达。 */
+   *  返回已有共享会话 cookie 载荷 { value, expiresAt } 或 null；登录完成（cookie
+   *  变化）经 onSsoCookie 回调送达同样结构。expiresAt 是秒级 Unix 时间戳，
+   *  null 表示上游为 session cookie。 */
   openAuthWindow: () => ipcRenderer.invoke("auth:openSSO"),
 
   /** 订阅 SSO 会话 cookie（主进程从 auth 域 session 捕获后推送，值只经内存不落盘）。 */
   onSsoCookie: (callback) => {
-    ipcRenderer.on("auth:ssoCookie", (_event, value) => callback(value));
+    ipcRenderer.on("auth:ssoCookie", (_event, payload) => callback(payload));
   },
 
   /** Electron 主进程截获 ⌘W 后转交工作台：由当前焦点区域决定关闭哪个对象。 */

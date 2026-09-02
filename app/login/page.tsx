@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Logo, Wordmark } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
+import type { SsoCookiePayload } from "@/lib/types";
 
 /**
  * 登录页：Electron 宿主优先走 auth SSO 子窗口（auth.zmzai.cloud，
@@ -11,12 +12,15 @@ import { client } from "@/lib/client";
  * Web 宿主 / SSO 不可用时保留邮箱密码表单（服务端转发 muzhi 登录）。
  */
 
-/** 把 SSO 捕获的会话 cookie 落成本地 host-only cookie，成功后整页刷新。 */
-async function ingestSsoCookie(value: string) {
+/** 把 SSO 捕获的会话 cookie 落成本地 host-only cookie，成功后整页刷新。
+ *  expiresAt 是秒级 Unix 时间戳（来自 Electron Cookie.expirationDate），随值一起
+ *  交给服务端，让本地 cookie 与上游 session 同步过期；上游为 session cookie 时
+ *  传 null，由服务端按 30 天兜底。 */
+async function ingestSsoCookie(value: string, expiresAt: number | null) {
   const res = await fetch("/api/auth/ingest", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ value, expiresAt }),
   });
   if (!res.ok) throw new Error("会话写入失败");
   window.location.href = "/";
@@ -32,11 +36,15 @@ export default function LoginPage() {
   const [ssoHint, setSsoHint] = useState<string | null>(null);
   const ssoHandled = useRef(false);
 
-  const finishSso = useCallback((value: string) => {
+  // 主进程推送的是 { value, expiresAt } 载荷；老版本宿主可能仍只推字符串，做兼容
+  const finishSso = useCallback((payload: SsoCookiePayload | string) => {
     if (ssoHandled.current) return; // cookie changed 可能连发多次，只吃第一颗
+    const value = typeof payload === "string" ? payload : payload?.value;
+    if (!value) return;
+    const expiresAt = typeof payload === "string" ? null : (payload.expiresAt ?? null);
     ssoHandled.current = true;
     setSsoHint("登录成功，正在进入工作台…");
-    void ingestSsoCookie(value).catch(() => {
+    void ingestSsoCookie(value, expiresAt).catch(() => {
       ssoHandled.current = false;
       setSsoHint(null);
       setError("会话写入失败，请重试");

@@ -112,11 +112,23 @@ function openAuthWindow(mainWin) {
   });
 }
 
+/** 归一化为渲染层/comed 端约定的载荷。
+ *  Electron 的 Cookie.expirationDate 是**秒级** Unix 时间戳；session cookie 该字段
+ *  缺失（或为 0），转成 null 交给服务端按 30 天兜底。上游有效期必须一路传到
+ *  /api/auth/ingest，否则本地 cookie 会比服务端 session 活得更久，用户会看到
+ *  「已登录但请求全被拒」的怪状态。 */
+function toSsoPayload(cookie) {
+  const raw = cookie && cookie.expirationDate;
+  const expiresAt = typeof raw === "number" && raw > 0 ? raw : null;
+  return { value: cookie.value, expiresAt };
+}
+
 /** 默认 session 里找已有的 .zmzai.cloud 共享会话 cookie（此前登录过的兜底）。 */
 async function findSsoCookie() {
   try {
     const list = await session.defaultSession.cookies.get({ name: AUTH_COOKIE_NAME });
-    return list.find((c) => c.domain && c.domain.includes("zmzai.cloud"))?.value ?? null;
+    const hit = list.find((c) => c.domain && c.domain.includes("zmzai.cloud"));
+    return hit ? toSsoPayload(hit) : null;
   } catch {
     return null;
   }
@@ -132,7 +144,7 @@ function startCookieWatch() {
     if (authWin && !authWin.isDestroyed()) authWin.close();
     // 动态取主窗：窗口可能被关闭重建，固定引用会失效
     const mainWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith(WEB_URL));
-    mainWin?.webContents.send("auth:ssoCookie", cookie.value);
+    mainWin?.webContents.send("auth:ssoCookie", toSsoPayload(cookie));
   });
 }
 

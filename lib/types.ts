@@ -250,15 +250,24 @@ export type PluginInfo = {
   hasMcp: boolean;
 };
 
+/** SSO 捕获到的会话 cookie 载荷。
+ *  `expiresAt` 是**秒级** Unix 时间戳（沿用 Electron Cookie.expirationDate 的单位，
+ *  与 /api/auth/ingest 的 maxAge 换算保持同一量纲）；null 表示上游发的是 session
+ *  cookie（无显式有效期），此时由服务端按 30 天兜底缓存。 */
+export type SsoCookiePayload = {
+  value: string;
+  expiresAt: number | null;
+};
+
 /** Electron 宿主桥（preload.cjs 注入 window.lecternNative；Web 端不存在，需能力探测降级）。 */
 export type LecternNativeBridge = {
   pickFolder?: () => Promise<string | null>;
   /** 任务完成系统通知（主进程 Notification；仅 Electron 宿主存在）。 */
   notifyTaskDone?: () => void;
-  /** SSO 登录：打开 auth 子窗口；立即返回已有共享会话 cookie 值（登录过）或 null。 */
-  openAuthWindow?: () => Promise<string | null>;
-  /** 订阅 SSO 会话 cookie：主进程捕获 auth 域会话 cookie 后推送。 */
-  onSsoCookie?: (callback: (value: string) => void) => void;
+  /** SSO 登录：打开 auth 子窗口；立即返回已有共享会话 cookie（登录过）或 null。 */
+  openAuthWindow?: () => Promise<SsoCookiePayload | null>;
+  /** 订阅 SSO 会话 cookie：主进程捕获 auth 域会话 cookie 后推送（含上游有效期）。 */
+  onSsoCookie?: (callback: (payload: SsoCookiePayload) => void) => void;
   /** ⌘W 被宿主截获后调用；回调由前端按当前焦点关闭对应 pane。 */
   onCloseFocusedPane?: (callback: () => void) => () => void;
 };

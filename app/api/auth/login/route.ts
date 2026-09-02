@@ -14,16 +14,29 @@ export const runtime = "nodejs";
  * 本地调试关键点：muzhi 正式站签发的会话 cookie 带 Secure（production 恒真）、
  * 可能带 Domain=.zmzai.cloud——浏览器在 http://127.0.0.1 上会拒绝保存，
  * 导致「登录成功但 harness 域始终无 cookie」。这里重写为 host-only cookie
- * （只保留 name=value + Path + HttpOnly）。服务端透传给 relay 时只看
+ * （保留 Path / HttpOnly / 有效期）。服务端透传给 relay 时只看
  * cookie 值本身，剥离属性不影响全链路鉴权。
  */
 function sanitizeCookie(raw: string): string {
   const [pair, ...attrs] = raw.split(";");
-  const keep = attrs.filter((a) => {
-    const key = a.trim().split("=")[0].toLowerCase();
-    return key === "path" || key === "httponly";
-  });
-  return [pair, ...keep].join("; ");
+  const kept: string[] = [];
+  let hasLifetime = false;
+  for (const attr of attrs) {
+    const [rawKey, rawValue = ""] = attr.trim().split("=", 2);
+    const key = rawKey.toLowerCase();
+    if (key === "path" || key === "httponly" || key === "expires" || key === "max-age") {
+      kept.push(attr.trim());
+      hasLifetime ||= key === "expires" || key === "max-age";
+    }
+    // SameSite=None 必须配合 Secure；本地 http host-only cookie 会被浏览器拒绝，
+    // 因而不透传该属性，使用下方的 Lax 默认值。
+    if (key === "samesite" && /^(lax|strict)$/i.test(rawValue)) kept.push(attr.trim());
+  }
+  // 上游若发的是 session cookie，桌面端重启会丢失。缓存凭据本身仍会被 relay
+  // 校验，最多保留 30 天；上游给出的更短有效期始终优先。
+  if (!hasLifetime) kept.push("Max-Age=2592000");
+  if (!kept.some((attr) => attr.toLowerCase().startsWith("samesite="))) kept.push("SameSite=Lax");
+  return [pair, ...kept].join("; ");
 }
 
 export async function POST(request: NextRequest) {
