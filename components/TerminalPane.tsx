@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { SquareTerminal } from "lucide-react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
@@ -599,7 +600,7 @@ export default function TerminalPane({
               >
                 <button type="button" role="tab" aria-selected={isActive} onClick={() => switchSession(s.id)} className="inline-flex h-full items-center gap-1.5 pl-2 focus-visible:outline-none">
                   <span className={cn("h-1 w-1 shrink-0 rounded-full", s.status === "running" ? "bg-[#23d18b]" : "bg-[#717178]")} />
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <SquareTerminal size={13} strokeWidth={1.55} aria-hidden="true" className="shrink-0" />
                   <span className="max-w-36 truncate">{s.name}</span>
                 </button>
                 <button type="button" title={`关闭 ${s.name}`} onClick={() => void killSession(s.id)} className="mr-1 flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-[3px] text-[#aaaab0] opacity-0 hover:bg-white/10 hover:text-white group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none">

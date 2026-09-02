@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PanelLeft } from "lucide-react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
@@ -135,10 +136,7 @@ export default function ProjectSwitcher({
           aria-label="收起会话栏"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="1.2" />
-            <path d="M6 2.5v11M10 5 7 8l3 3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <PanelLeft size={16} strokeWidth={1.55} aria-hidden="true" />
         </button>
       )}
       </div>

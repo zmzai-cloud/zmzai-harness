@@ -38,6 +38,7 @@
     "@xterm/xterm": "^6.0.0",
     "@zmzai/agent-framework": "link:../zmzai-framework",
     "@zmzai/theme": "^0.9.10",
+    "lucide-react": "^1.39.0",
     "next": "15.5.21",
     "react": "19.2.8",
     "react-dom": "19.2.8",

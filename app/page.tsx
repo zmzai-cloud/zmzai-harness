@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
+import { PanelBottom, PanelLeft, PanelRight } from "lucide-react";
 import { Navbar, navItemClass } from "@zmzai/theme";
 
 import CommandPalette, { type Command } from "@/components/CommandPalette";
@@ -812,7 +813,7 @@ export default function App() {
               aria-label={workbenchOpen ? "收起右侧工作区" : "展开右侧工作区"}
               className="hidden h-7 w-7 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong min-[1180px]:inline-flex"
             >
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M10 2.5v11" /><path d={workbenchOpen ? "M6 5l3 3-3 3" : "M10 5 7 8l3 3"} strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <PanelRight size={16} strokeWidth={1.55} aria-hidden="true" />
             </button>
             {!sidebarOpen && <button
               type="button"
@@ -821,10 +822,7 @@ export default function App() {
               aria-label="展开会话栏"
               className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
             >
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35">
-                <rect x="1.5" y="2.5" width="13" height="11" rx="1.2" />
-                <path d="M6 2.5v11M6 5l3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <PanelLeft size={16} strokeWidth={1.55} aria-hidden="true" />
             </button>}
           </>
         }
@@ -948,7 +946,7 @@ export default function App() {
           aria-keyshortcuts="Meta+J Control+J"
           className="flex h-5 w-5 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.2" /><path d="M4 6l2.5 2L4 10M8 10.5h4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <PanelBottom size={14} strokeWidth={1.55} aria-hidden="true" />
         </button>
         <span className="text-line-strong">·</span>
         <span className="font-mono">
