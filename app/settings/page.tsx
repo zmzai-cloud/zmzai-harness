@@ -5,20 +5,24 @@ import Link from "next/link";
 import { Button, Navbar } from "@zmzai/theme";
 
 import AccountBlock from "@/components/AccountBlock";
+import ThemeToggle from "@/components/ThemeToggle";
 import { client } from "@/lib/client";
 import { readPref, writePref } from "@/lib/prefs";
 import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo } from "@/lib/types";
 
 /**
  * 设置中心（独立页，替代旧版弹窗）：左侧导航 + 右侧分区内容。
- * 通用（relay 服务端点）/ 模型与凭据（个人 key、轮换、本地 Ollama）/
- * MCP 服务 / 插件。所有修改保存即生效，无需重启。
+ * 通用（外观、relay 服务端点）/ Agent 与权限 / 权限日志 /
+ * 模型与凭据（个人 key、轮换、本地 Ollama）/ MCP 服务 / 插件。
+ * 所有修改保存即生效，无需重启。
  */
 
-type SectionId = "general" | "credentials" | "mcp" | "plugins";
+type SectionId = "general" | "agent" | "audit" | "credentials" | "mcp" | "plugins";
 
 const NAV: { id: SectionId; label: string }[] = [
   { id: "general", label: "通用" },
+  { id: "agent", label: "Agent 与权限" },
+  { id: "audit", label: "权限日志" },
   { id: "credentials", label: "模型与凭据" },
   { id: "mcp", label: "MCP 服务" },
   { id: "plugins", label: "插件" },
@@ -377,6 +381,15 @@ export default function SettingsPage() {
 
             {section === "general" && (
               <>
+                <Card title="外观" desc="选择 Lectern 的显示主题。设置会立即应用，并在下次启动时保留。">
+                  <div className="flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-ink">界面主题</div>
+                      <div className="mt-0.5 text-xs leading-5 text-ink-3">跟随系统、浅色和深色三种模式。</div>
+                    </div>
+                    <ThemeToggle />
+                  </div>
+                </Card>
                 <Card title="relay 服务端点" desc="模型目录与对话请求的 OpenAI 兼容基址。优先级：此处配置 > RELAY_URL 环境变量 > 本机默认。修改保存后立即生效（含进行中会话的下一条消息）。">
                   <div className="mb-3 flex items-center gap-2">
                     <input
@@ -402,9 +415,6 @@ export default function SettingsPage() {
                     <div>申请入口：relay 控制台 → API Keys → 新建 key（zrk_ 开头），配「模型与凭据」里的个人 key 使用。</div>
                   </div>
                 </Card>
-                <PermCard perm={perm} onChange={setPermDomain} />
-                {permSaved && <div className="-mt-5 mb-6 text-[0.6875rem] text-success">权限配置已保存，立即生效。</div>}
-                <AuditCard />
                 <Card title="关于" desc="harness 本地工作台：Agent 对话、文件/Git 审查、MCP、插件均在本页所在服务完成。">
                   <div className="text-[0.6875rem] leading-5 text-ink-3">
                     <div>数据目录：data/（settings.json 0600、zmzai.db WAL、.secret 密钥文件）</div>
@@ -413,6 +423,15 @@ export default function SettingsPage() {
                 </Card>
               </>
             )}
+
+            {section === "agent" && (
+              <>
+                <PermCard perm={perm} onChange={setPermDomain} />
+                {permSaved && <div className="-mt-5 mb-6 text-[0.6875rem] text-success">权限配置已保存，立即生效。</div>}
+              </>
+            )}
+
+            {section === "audit" && <AuditCard />}
 
             {section === "credentials" && (
               <>
