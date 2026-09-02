@@ -140,6 +140,21 @@ export type TerminalChunk = {
   session: TerminalSession;
 };
 
+/** /api/terminal/read-all 批量游标读响应（单请求替代逐会话轮询）。 */
+export type TerminalReadAllResult = {
+  sessions: Array<{
+    id: string;
+    output: string;
+    cursor: number;
+    status: string;
+    exitCode: number | null;
+    name?: string;
+    backend: "pty" | "pipe";
+    bytesTotal: number;
+  }>;
+  missing: string[];
+};
+
 // ===== 工作台（多项目 / 模型选择 / Skill / 上下文 / 个人 key）=====
 
 export type Project = { id: string; name: string; path: string; createdAt: string };

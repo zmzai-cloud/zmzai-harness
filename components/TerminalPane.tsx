@@ -114,7 +114,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }, []);
@@ -208,35 +208,61 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
     if (term) queueResize(id, term.cols, term.rows);
   }, [queueResize]);
 
-  // 轮询循环：所有会话都读增量；只有激活会话写 xterm，否则只追加到会话 buffer。
+  // 轮询循环：单请求批量拉所有会话增量；只有激活会话写 xterm，否则只追加到会话 buffer。
+  // 自适应节奏：有新输出/状态变化 → 300ms；空闲逐级退避到 2s——dev 模式下每请求
+  // 都打一行日志，固定 300ms × N 会话会把 dev 终端刷成瀑布并拖慢交互。
   const startPoll = useCallback(() => {
     stopPoll();
-    pollRef.current = setInterval(async () => {
-      const list = sessionsRef.current;
-      const active = activeIdRef.current;
-      for (const s of list) {
-        try {
-          const chunk = await client.terminalRead(s.id, s.cursor);
+    let delay = 300;
+    const tick = async () => {
+      let nextDelay = 300;
+      let statusChanged = false;
+      const cursors: Record<string, number> = {};
+      for (const s of sessionsRef.current) cursors[s.id] = s.cursor;
+      try {
+        const batch = await client.terminalReadAll(cursors);
+        const active = activeIdRef.current;
+        for (const chunk of batch.sessions) {
+          const s = sessionsRef.current.find((e) => e.id === chunk.id);
+          // 批量响应里出现的未知会话（另一端新建）：补进本地列表
+          if (!s) {
+            sessionsRef.current.push({
+              id: chunk.id,
+              name: chunk.name ?? chunk.id,
+              shell: "",
+              status: chunk.status as Sess["status"],
+              cursor: 0,
+              buffer: "",
+            });
+            statusChanged = true;
+            continue;
+          }
           s.cursor = chunk.cursor;
           if (chunk.output) {
             s.buffer += chunk.output;
             if (s.id === active) termRef.current?.write(chunk.output);
           }
-          const next = chunk.session.status as Sess["status"];
-          const exited = next !== s.status && next !== "running";
-          if (next !== s.status) s.status = next;
-          if (exited) {
-            if (s.id === active) {
+          const next = chunk.status as Sess["status"];
+          if (next !== s.status) {
+            s.status = next;
+            statusChanged = true;
+            if (next !== "running" && s.id === active) {
               termRef.current?.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
             }
           }
-        } catch {
-          // 单会话读失败不连累其他；保留原状态
         }
+        // 只有状态点变化才需要 re-render（buffer/cursor 不影响列表 UI）
+        if (statusChanged) setSessions((prev) => prev.slice());
+        // 本轮任何会话有新输出 → 保持快节奏；全空闲 → 退避
+        const anyOutput = batch.sessions.some((c) => c.output.length > 0);
+        nextDelay = anyOutput || statusChanged ? 300 : Math.min(delay * 2, 2000);
+      } catch {
+        nextDelay = 1000; // 批量读失败：稍作退避重试，不连累整体
       }
-      // 触发一次 re-render（buffer/cursor 变化不会自动反映到 UI 列表里）
-      setSessions((prev) => prev.slice());
-    }, 300);
+      delay = nextDelay;
+      pollRef.current = setTimeout(tick, delay);
+    };
+    pollRef.current = setTimeout(tick, delay);
   }, [stopPoll]);
 
   // 挂载：建 xterm + 输入接线 + 自适应 + 拉取/补建会话 + 启动轮询
