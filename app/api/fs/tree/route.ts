@@ -16,6 +16,21 @@ export type TreeNode = {
   mtime: string;
 };
 
+/** 目录树懒加载默认跳过的目录（噪音大 + stat 成本高，@ 引用用不到）。 */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  ".next",
+  "out",
+  ".turbo",
+  ".cache",
+  ".parcel-cache",
+  "coverage",
+  ".vercel",
+]);
+
 /** GET /api/fs/tree?path=src/lib — 列出工作区内某目录一层内容（懒加载目录树） */
 export async function GET(request: NextRequest) {
   const dir = request.nextUrl.searchParams.get("path") ?? "";
@@ -23,21 +38,33 @@ export async function GET(request: NextRequest) {
   try {
     const abs = resolveWithinWorkspace(dir, root);
     const entries = await readdir(abs, { withFileTypes: true });
-    const nodes: TreeNode[] = [];
-    for (const e of entries) {
-      // 隐藏目录只显示 .zmzai（agent 配置所在），其余跳过减少噪音
-      if (e.name.startsWith(".") && e.name !== ".zmzai") continue;
-      const node: TreeNode = { name: e.name, type: e.isDirectory() ? "dir" : "file", mtime: "" };
-      try {
-        const st = await stat(join(abs, e.name));
-        node.mtime = st.mtime.toISOString();
-        if (e.isFile()) node.size = st.size;
-        else if (e.isSymbolicLink()) node.type = "dir";
-      } catch {
-        // stat 失败（权限等）仍保留条目
-      }
-      nodes.push(node);
-    }
+
+    // 过滤 + 并行 stat：避免串行逐个系统调用拖慢大目录
+    const visible = entries.filter(
+      (e) =>
+        !(e.name.startsWith(".") && e.name !== ".zmzai") &&
+        !(e.isDirectory() && SKIP_DIRS.has(e.name)),
+    );
+
+    const nodes = await Promise.all(
+      visible.map(async (e): Promise<TreeNode> => {
+        const node: TreeNode = {
+          name: e.name,
+          type: e.isDirectory() ? "dir" : "file",
+          mtime: "",
+        };
+        try {
+          const st = await stat(join(abs, e.name));
+          node.mtime = st.mtime.toISOString();
+          if (e.isFile()) node.size = st.size;
+          else if (e.isSymbolicLink()) node.type = "dir";
+        } catch {
+          // stat 失败（权限等）仍保留条目
+        }
+        return node;
+      }),
+    );
+
     // 目录在前，各自按名称排序
     nodes.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1));
     return NextResponse.json({ path: dir, nodes });

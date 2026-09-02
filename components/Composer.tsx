@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Textarea, cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
-import type { ModelRef, ModelsState, SkillOption, ThinkingEffort, UsageInfo } from "@/lib/types";
+import type { ModelRef, ModelsState, SkillOption, ThinkingEffort, TreeNode, UsageInfo } from "@/lib/types";
 
 /** token 数缩写：1234 → 1.2k */
 function fmtTokens(n: number): string {
@@ -60,6 +60,10 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   const [atQuery, setAtQuery] = useState<string | null>(null);
   const [atItems, setAtItems] = useState<FileHit[]>([]);
   const [atIndex, setAtIndex] = useState(0);
+  // 目录列表缓存：同一目录内只读一次，后续敲字符本地过滤（避免每次字符都全量 readdir）
+  const atDirCacheRef = useRef<Map<string, TreeNode[]>>(new Map());
+  // 取消上一次未完成的目录请求（防止快速输入时请求排队堆积）
+  const atAbortRef = useRef<AbortController | null>(null);
 
   // 模型目录与技能列表（会话无关，进页面拉一次）
   useEffect(() => {
@@ -67,27 +71,57 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     void client.listSkills().then((r) => setSkills(r.skills)).catch(() => undefined);
   }, []);
 
-  // @ 引用：按已输入路径懒加载目录，按最后一段过滤
+  // @ 引用：按已输入路径懒加载目录，按最后一段过滤。
+  // 优化：①目录级缓存（同目录不再重复请求）②150ms debounce（停止输入才请求）
+  //      ③AbortController 取消过期请求。
   useEffect(() => {
-    if (atQuery == null) return;
+    if (atQuery == null) {
+      atAbortRef.current?.abort();
+      atAbortRef.current = null;
+      return;
+    }
     const slash = atQuery.lastIndexOf("/");
     const dir = slash >= 0 ? atQuery.slice(0, slash) : "";
     const base = slash >= 0 ? atQuery.slice(slash + 1).toLowerCase() : atQuery.toLowerCase();
+    const filterDir = (nodes: TreeNode[]) => {
+      const hits = nodes
+        .filter((n) => !base || n.name.toLowerCase().includes(base))
+        .slice(0, 8)
+        .map((n) => ({ path: dir ? `${dir}/${n.name}` : n.name, type: n.type }));
+      setAtItems(hits);
+      setAtIndex(0);
+    };
+
+    // 命中缓存：直接本地过滤，零网络请求
+    const cached = atDirCacheRef.current.get(dir);
+    if (cached) {
+      filterDir(cached);
+      return;
+    }
+
+    // debounce 150ms：停止输入后才真正发目录请求
     let disposed = false;
-    void client
-      .fsTree(dir)
-      .then((r) => {
-        if (disposed) return;
-        const hits = r.nodes
-          .filter((n) => !base || n.name.toLowerCase().includes(base))
-          .slice(0, 8)
-          .map((n) => ({ path: dir ? `${dir}/${n.name}` : n.name, type: n.type }));
-        setAtItems(hits);
-        setAtIndex(0);
-      })
-      .catch(() => setAtItems([]));
+    const timer = setTimeout(() => {
+      if (disposed) return;
+      atAbortRef.current?.abort();
+      const controller = new AbortController();
+      atAbortRef.current = controller;
+      void client
+        .fsTree(dir, undefined, controller.signal)
+        .then((r) => {
+          if (disposed) return;
+          atDirCacheRef.current.set(dir, r.nodes);
+          filterDir(r.nodes);
+        })
+        .catch(() => {
+          if (disposed) return;
+          setAtItems([]);
+        });
+    }, 150);
+
     return () => {
       disposed = true;
+      clearTimeout(timer);
     };
   }, [atQuery]);
 

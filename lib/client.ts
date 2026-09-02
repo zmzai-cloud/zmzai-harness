@@ -129,8 +129,8 @@ export const client = {
 
   // ===== Inspector =====
 
-  fsTree: (path: string, sessionId?: string | null) =>
-    fetch(`/api/fs/tree?path=${encodeURIComponent(path)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) =>
+  fsTree: (path: string, sessionId?: string | null, signal?: AbortSignal) =>
+    fetch(`/api/fs/tree?path=${encodeURIComponent(path)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal }).then((r) =>
       j<{ path: string; nodes: TreeNode[] }>(r),
     ),
 
