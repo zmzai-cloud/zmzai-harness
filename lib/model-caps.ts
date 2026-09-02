@@ -15,6 +15,8 @@
 export type ModelCaps = {
   contextWindow?: number;
   maxTokens?: number;
+  /** relay 允许该模型的推理强度档位（reasoning_effort 白名单）。 */
+  allowedReasoningEfforts?: string[];
 };
 
 type CapsStore = { __lecternModelCaps?: Map<string, ModelCaps> };
@@ -30,9 +32,13 @@ function positive(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/** relay 承认的 reasoning_effort 档位全集。目录里出现的未知档位直接丢弃，
+ *  避免把脏值灌给 provider（provider 的 thinkingLevelMap 只认这六个）。 */
+const KNOWN_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+
 /** 灌入模型目录（幂等，后写覆盖）。任何拉到 relay 模型列表的地方都应调用。 */
 export function primeModelCaps(
-  list: readonly { model?: string; maxInputTokens?: number; maxOutputTokens?: number }[] | null | undefined,
+  list: readonly { model?: string; maxInputTokens?: number; maxOutputTokens?: number; allowedReasoningEfforts?: string[] }[] | null | undefined,
 ): void {
   if (!list?.length) return;
   const map = store();
@@ -44,6 +50,10 @@ export function primeModelCaps(
     const maxTokens = positive(entry.maxOutputTokens);
     if (contextWindow !== undefined) caps.contextWindow = contextWindow;
     if (maxTokens !== undefined) caps.maxTokens = maxTokens;
+    const efforts = Array.isArray(entry.allowedReasoningEfforts)
+      ? entry.allowedReasoningEfforts.filter((e): e is string => typeof e === "string" && KNOWN_EFFORTS.has(e))
+      : undefined;
+    if (efforts?.length) caps.allowedReasoningEfforts = [...new Set(efforts)];
     map.set(id, caps);
   }
 }

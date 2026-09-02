@@ -14,7 +14,7 @@ function fmtTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-type ModelChoice = { id: string; name: string; channel: string; maxInputTokens?: number; routable: boolean };
+type ModelChoice = { id: string; name: string; channel: string; maxInputTokens?: number; routable: boolean; allowedReasoningEfforts?: string[] };
 
 type FileHit = { path: string; type: "dir" | "file" };
 
@@ -170,6 +170,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         channel: ch > 0 ? `${ch} 渠道` : "无可用渠道",
         maxInputTokens: m.maxInputTokens,
         routable: ch > 0,
+        allowedReasoningEfforts: m.allowedReasoningEfforts,
       });
     }
     return out;
@@ -219,6 +220,25 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
    *  上游报错/挂起表现为会话「卡住」，发送前拦截）。 */
   const VISION_UNSAFE = /^(deepseek|o3-mini|gpt-4o-mini)/i;
   const currentModelId = selectedModel?.modelId ?? "deepseek-v4-flash";
+
+  // 当前模型允许的推理档位（relay allowedReasoningEfforts 白名单）。
+  // 未覆盖（目录没给 / 本地 Ollama）时 undefined = 不限制（沿用旧静态枚举行为，
+  // 交给 relay 兜底校验）；有白名单则只放行白名单内的档位。
+  const allowedEfforts = useMemo(() => {
+    if (selectedModel?.providerId === "ollama") return undefined;
+    const hit = modelChoices.find((m) => m.id === currentModelId);
+    return hit?.allowedReasoningEfforts && hit.allowedReasoningEfforts.length > 0
+      ? new Set(hit.allowedReasoningEfforts)
+      : undefined;
+  }, [modelChoices, currentModelId, selectedModel?.providerId]);
+
+  // 模型切换后，若已选档位不在新模型白名单内（如选了 high 又切到只允许 low 的
+  // 模型），自动回落 off，避免残留一个 relay 会 400 的档位。
+  useEffect(() => {
+    if (effort !== "off" && allowedEfforts !== undefined && !allowedEfforts.has(effort)) {
+      setEffort("off");
+    }
+  }, [allowedEfforts, effort]);
 
   const submit = useCallback(async () => {
     const body = text.trim();
@@ -468,25 +488,32 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             { value: "minimal" as const, label: "最小", hint: "minimal" },
             { value: "low" as const, label: "低", hint: "low" },
             { value: "medium" as const, label: "中", hint: "medium" },
-            { value: "high" as const, label: "高", hint: "high（模型不支持时 relay 返回 400）" },
-          ] as const).map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => {
-                setEffort(opt.value);
-                setPopup(null);
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
-                effort === opt.value ? "bg-selected" : "hover:bg-surface-3",
-              )}
-            >
-              <span className="text-xs font-medium text-ink">{opt.label}</span>
-              <span className="ml-auto shrink-0 font-mono text-[0.625rem] text-ink-3">{opt.hint}</span>
-              {effort === opt.value && <CheckIcon />}
-            </button>
-          ))}
+            { value: "high" as const, label: "高", hint: "high" },
+          ] as const).map((opt) => {
+            // off 永远可用；有白名单时非白名单档位禁用（避免 relay 400）
+            const unsupported = opt.value !== "off" && allowedEfforts !== undefined && !allowedEfforts.has(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={unsupported}
+                title={unsupported ? "当前模型不支持此推理强度" : undefined}
+                onClick={() => {
+                  setEffort(opt.value);
+                  setPopup(null);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors",
+                  effort === opt.value ? "bg-selected" : "hover:bg-surface-3",
+                  unsupported && "cursor-not-allowed opacity-40",
+                )}
+              >
+                <span className="text-xs font-medium text-ink">{opt.label}</span>
+                <span className="ml-auto shrink-0 font-mono text-[0.625rem] text-ink-3">{unsupported ? "不支持" : opt.hint}</span>
+                {effort === opt.value && <CheckIcon />}
+              </button>
+            );
+          })}
         </div>
       )}
       {popup === "skill" && (

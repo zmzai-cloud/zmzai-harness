@@ -50,4 +50,23 @@ describe("model-caps", () => {
     primeModelCaps([{ model: "m", maxInputTokens: 200_000 }]);
     expect(capsFor("m")).toEqual({ contextWindow: 200_000 });
   });
+
+  it("stores allowed reasoning efforts after priming", () => {
+    primeModelCaps([{ model: "m", maxInputTokens: 128_000, allowedReasoningEfforts: ["low", "medium", "high"] }]);
+    expect(capsFor("m")?.allowedReasoningEfforts).toEqual(["low", "medium", "high"]);
+  });
+
+  it("filters unknown effort levels and dedupes", () => {
+    primeModelCaps([{ model: "m", allowedReasoningEfforts: ["low", "low", "bogus", "high"] }]);
+    expect(capsFor("m")?.allowedReasoningEfforts).toEqual(["low", "high"]);
+  });
+
+  it("omits the field entirely when the allowed list is empty or absent", () => {
+    primeModelCaps([
+      { model: "empty", allowedReasoningEfforts: [] },
+      { model: "absent", maxInputTokens: 128_000 },
+    ]);
+    expect(capsFor("empty")?.allowedReasoningEfforts).toBeUndefined();
+    expect(capsFor("absent")).toEqual({ contextWindow: 128_000 });
+  });
 });

@@ -168,7 +168,7 @@ export type ModelChannel = {
 
 export type ModelsState = {
   /** relay /v1/models 已按调用者身份过滤（个人 key → allowedModels 子集；登录会话 → 全部）；availableChannels 为当前健康渠道数（0 表示提交即失败）。 */
-  models: { model: string; maxInputTokens: number; availableChannels?: number }[];
+  models: { model: string; maxInputTokens: number; availableChannels?: number; allowedReasoningEfforts?: string[] }[];
   modelSelectorData: { featured: FeaturedModel[]; channels: ModelChannel[] } | null;
   authenticated: boolean;
   /** 本地 Ollama（在线时非 null）：模型以 providerId=ollama 的 ModelRef 使用。 */
