@@ -16,16 +16,19 @@ type Props = {
 };
 
 /**
- * 成果预览：把工作区生成的 HTML 产物在 iframe（srcDoc）中实时渲染。
+ * 成果预览：把工作区生成的 HTML 产物在隔离 iframe 中实时渲染。
  * 组件名仍为 CanvasPane（内部实现名，spec 明示避免无谓重命名），
  * 但用户可见文案一律为「成果预览」。
- * HTML 用 srcDoc 隔离渲染（不落临时路由）；其余文本文件回退为代码预览。
+ * HTML 经受控的工作区文件路由加载，让相对 CSS / JS / 图片引用照常解析；
+ * 其余文本文件回退为代码预览。
  */
 export default function CanvasPane({ path, onPathChange, sessionId, onOpenFiles }: Props) {
   const [draft, setDraft] = useState(path ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** 每次打开/刷新都换 URL，确保 iframe 不会保留上一版 document。 */
+  const [revision, setRevision] = useState(0);
   // §7.5：结果头部提供桌面/移动视口切换。HTML 产物常是页面，视口是真实需要的能力。
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
 
@@ -41,6 +44,7 @@ export default function CanvasPane({ path, onPathChange, sessionId, onOpenFiles 
       const f = await client.fsFile(p.trim(), sessionId);
       setContent(f.content);
       onPathChange(f.path);
+      setRevision((current) => current + 1);
     } catch (err) {
       setContent(null);
       setError(err instanceof Error ? err.message : "打开失败");
@@ -52,6 +56,9 @@ export default function CanvasPane({ path, onPathChange, sessionId, onOpenFiles 
   // 统一到共享判定：原先这里用 endsWith(".html")||endsWith(".htm") 就地判断，
   // 与 WorkbenchPanel 的正则各写一份——是典型的漂移源，改一处就会不一致。
   const isHtml = path ? isPreviewable(path) : false;
+  const previewSrc = path && isHtml
+    ? `/api/preview/${encodeURIComponent(sessionId ?? "_")}/${path.split("/").map(encodeURIComponent).join("/")}?v=${revision}`
+    : null;
 
   useEffect(() => {
     if (path) void open(path);
@@ -145,11 +152,25 @@ export default function CanvasPane({ path, onPathChange, sessionId, onOpenFiles 
           {loading ? "加载中…" : "刷新"}
         </button>
       </div>
-      {isHtml ? (
+      {error ? (
+        <div className="wb-empty">
+          <div className="text-sm font-semibold text-danger">无法加载成果预览</div>
+          <div className="max-w-md break-words text-center font-mono text-xs leading-5 text-ink-3">{error}</div>
+          <button
+            type="button"
+            onClick={() => void open(path)}
+            className="rounded-[3px] bg-surface-2 px-2 py-1 text-[0.6875rem] font-medium text-ink-2 transition-colors hover:text-ink"
+          >
+            重试
+          </button>
+        </div>
+      ) : loading && content === null ? (
+        <div className="wb-empty text-xs text-ink-3">正在加载成果预览…</div>
+      ) : isHtml ? (
         <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-surface-2">
           <iframe
             title="成果预览"
-            srcDoc={content ?? ""}
+            src={previewSrc ?? undefined}
             sandbox="allow-scripts"
             className="min-h-0 shrink-0 border-0 bg-white"
             style={
