@@ -17,7 +17,7 @@ import AccountBlock from "@/components/AccountBlock";
 import { client, type ConnectionState } from "@/lib/client";
 import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
 import { readPref, writePref, clearPref } from "@/lib/prefs";
-import { deriveTaskPresentation, previewableOf, type PresentationTerminal, type SessionStatus } from "@/lib/task-presentation";
+import { deriveTaskPresentation, previewableOf, type SessionStatus } from "@/lib/task-presentation";
 import type { SessionInfo, SessionListItem, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
@@ -239,14 +239,6 @@ export default function App() {
   const [viewportHeight, setViewportHeight] = useState(() => typeof window === "undefined" ? 900 : window.innerHeight);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(() => readWidth("lectern:bottom-panel-height", 260, 160, 640));
   const [bottomPanelOpen, setBottomPanelOpen] = useState(() => typeof window === "undefined" || window.localStorage.getItem("lectern:bottom-panel-open") !== "0");
-  // 终端元数据（V2 DebugArea 收敛）：由 DebugArea/TerminalPane 上抛，供状态机消费
-  // 「会话空闲但命令还在跑 → running」「最近非零退出 → 次级失败 badge」。
-  const [terminalMeta, setTerminalMeta] = useState<PresentationTerminal>({ hasLiveProcess: false });
-  const handleTerminalState = useCallback((t: PresentationTerminal) => {
-    setTerminalMeta((prev) =>
-      prev.hasLiveProcess === t.hasLiveProcess && prev.lastExitCode === t.lastExitCode ? prev : t,
-    );
-  }, []);
   // 会话级 worktree 隔离（robustness-plan §9）：新建会话默认勾选「隔离副本」（持久化）
   const [isolateNew, setIsolateNew] = useState(false);
   // active 会话的隔离状态（切换会话时按服务端为准查询）+ 操作结果横幅
@@ -460,9 +452,6 @@ export default function App() {
       if (target && !target.running && !target.lastOutcome) {
         setBottomPanelOpen(false);
       }
-      // 终端元数据是会话级的：切会话时先清空，避免残留上一会话的 hasLiveProcess
-      // 造成状态机短暂误判（DebugArea 重挂载后 TerminalPane 会重新上抛）。
-      setTerminalMeta({ hasLiveProcess: false });
       setActiveId(id);
     }
   }, [activeId, sessions]);
@@ -613,7 +602,6 @@ export default function App() {
     setActiveId(s.id);
     // 全新空闲任务默认收起调试区（§4.6）：让 Composer 成为中央锚点，终端不抢戏。
     setBottomPanelOpen(false);
-    setTerminalMeta({ hasLiveProcess: false });
     setActiveIsolation(s.isolation ? { ...s.isolation } : { enabled: false });
     if (s.isolation && !s.isolation.enabled && s.isolation.reason) {
       setWtNotice({ kind: "error", text: "隔离副本未启用（当前项目不是 git 仓库），本次会话直接在主工作区进行。" });
@@ -775,9 +763,6 @@ export default function App() {
           : null,
         editedPaths: chatData.editedPaths,
         previewablePaths,
-        // V2 DebugArea 收敛：终端元数据已从占位改为真实上抛。hasLiveProcess 让
-        // 「会话空闲但命令还在跑」派生成 running；lastExitCode 转成次级失败 badge。
-        terminal: terminalMeta,
         explicitWorkbenchTab: null,
         explicitDebugTab: null,
       }),
@@ -788,7 +773,6 @@ export default function App() {
       chatData.editedPaths,
       previewablePaths,
       pending,
-      terminalMeta,
     ],
   );
 
@@ -916,7 +900,7 @@ export default function App() {
           {bottomPanelOpen && <>
             <HorizontalSplitter label="调整底部调试面板高度" value={bottomPanelHeight} min={160} max={bottomPanelMax} onReset={() => setBottomPanelHeight(260)} onChange={setBottomPanelHeight} />
             <div className="flex min-h-0 shrink-0 border-t border-line" style={{ height: bottomPanelHeight }}>
-              <DebugArea key={activeId ?? "new-task"} sessionId={activeId} onTerminalState={handleTerminalState} onCollapse={toggleBottomPanel} />
+              <DebugArea key={activeId ?? "new-task"} sessionId={activeId} onCollapse={toggleBottomPanel} />
             </div>
           </>}
         </div>

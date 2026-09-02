@@ -13,7 +13,6 @@ function ctx(overrides: Partial<PresentationContext> = {}): PresentationContext 
     permissionRequest: null,
     editedPaths: [],
     previewablePaths: [],
-    terminal: { hasLiveProcess: false },
     explicitWorkbenchTab: null,
     explicitDebugTab: null,
     hasGitChanges: false,
@@ -60,13 +59,6 @@ describe("deriveTaskPresentation 状态机表", () => {
     expect(r.icon).toBe("spinner");
   });
 
-  it("行 3b：终端有活动进程 → running（即使 sessionStatus 非 running）", () => {
-    const r = deriveTaskPresentation(
-      ctx({ sessionStatus: "completed", terminal: { hasLiveProcess: true } }),
-    );
-    expect(r.state).toBe("running");
-  });
-
   it("行 4：失败且无产物无编辑 → failed", () => {
     const r = deriveTaskPresentation(
       ctx({ sessionStatus: "failed", editedPaths: [], previewablePaths: [] }),
@@ -77,7 +69,7 @@ describe("deriveTaskPresentation 状态机表", () => {
 
   it("running 优先于 failed（行 3 vs 4）：agent 仍在跑时不翻成 failed", () => {
     const r = deriveTaskPresentation(
-      ctx({ sessionStatus: "running", terminal: { hasLiveProcess: false, lastExitCode: 1 } }),
+      ctx({ sessionStatus: "running" }),
     );
     expect(r.state).toBe("running");
   });
@@ -125,17 +117,9 @@ describe("deriveTaskPresentation 状态机表", () => {
     expect(r.state).toBe("idle");
   });
 
-  it("review_ready 时若命令非零退出 → 带 command_failed 次级 badge", () => {
-    const r = deriveTaskPresentation(
-      ctx({ editedPaths: ["src/a.ts"], terminal: { hasLiveProcess: false, lastExitCode: 2 } }),
-    );
-    expect(r.state).toBe("review_ready");
-    expect(r.failureBadge).toEqual({ kind: "command_failed", label: "命令以非零退出" });
-  });
-
   it("failed 主态不重复挂 failure badge", () => {
     const r = deriveTaskPresentation(
-      ctx({ sessionStatus: "failed", terminal: { hasLiveProcess: false, lastExitCode: 1 } }),
+      ctx({ sessionStatus: "failed" }),
     );
     expect(r.state).toBe("failed");
     expect(r.failureBadge).toBeNull();
@@ -145,7 +129,6 @@ describe("deriveTaskPresentation 状态机表", () => {
     const input = ctx({
       sessionStatus: "failed",
       previewablePaths: ["out/a.html"],
-      terminal: { hasLiveProcess: false, lastExitCode: 1 },
     });
     expect(deriveTaskPresentation(input)).toEqual(deriveTaskPresentation(input));
   });

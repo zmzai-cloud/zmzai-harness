@@ -1,6 +1,5 @@
 "use client";
 
-import type { PresentationTerminal } from "@/lib/task-presentation";
 import TerminalPane from "./TerminalPane";
 
 /**
@@ -13,26 +12,22 @@ import TerminalPane from "./TerminalPane";
  * V0 的收敛目标）。
  *
  * 职责边界（spec §5）：
- * - TerminalPane 仍持有全部 PTY 所有权与会话密集逻辑，只把元数据经 onTerminalState
- *   上抛给编排层；DebugArea 不接管 PTY。
+ * - TerminalPane 持有全部 PTY 所有权与会话密集逻辑；DebugArea 不接管 PTY，
+ *   也不将 shell 是否常驻映射成 Agent 任务状态。
  * - DebugArea 承载 collapse/focus 命令（收起按钮注入到 tab 行右侧）与未来 debug
  *   tab 注册点。
  */
 export default function DebugArea({
   sessionId,
-  onTerminalState,
   onCollapse,
 }: {
   sessionId?: string | null;
-  /** 终端元数据上抛（透传给 TerminalPane，最终到 page.tsx 状态机）。 */
-  onTerminalState?: (t: PresentationTerminal) => void;
   /** 收起 Debug Area（⌘J / Ctrl+J 同源）。 */
   onCollapse?: () => void;
 }) {
   return (
     <TerminalPane
       sessionId={sessionId}
-      onTerminalState={onTerminalState}
       trailing={
         onCollapse ? (
           <button

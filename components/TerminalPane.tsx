@@ -6,7 +6,6 @@ import { SquareTerminal } from "lucide-react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
-import type { PresentationTerminal } from "@/lib/task-presentation";
 import type { ShellCandidate, TerminalReadAllResult } from "@/lib/types";
 import "@xterm/xterm/css/xterm.css";
 
@@ -75,17 +74,9 @@ type Sess = {
  */
 export default function TerminalPane({
   sessionId,
-  onTerminalState,
   trailing,
 }: {
   sessionId?: string | null;
-  /**
-   * 把终端元数据上抛给编排层（V2 DebugArea 收敛）：page.tsx 用它替换状态机里
-   * 的占位 `hasLiveProcess:false`，让「会话空闲但命令还在跑」也派生成 running，
-   * 并把最近一次非零退出码转成次级失败 badge（§7.6）。本组件仍持有 PTY 所有权，
-   * 只上抛「发生了什么」，不做任何状态判断。
-   */
-  onTerminalState?: (t: PresentationTerminal) => void;
   /** tab 行右侧追加动作（DebugArea 注入 collapse 按钮等）。 */
   trailing?: ReactNode;
 }) {
@@ -117,8 +108,6 @@ export default function TerminalPane({
   const lastBoxRef = useRef<{ w: number; h: number } | null>(null);
   /** 上一次 fit 得到的网格：onResize 只在网格真的变化时才入队（防浮点取整抖动）。 */
   const lastFitRef = useRef<{ cols: number; rows: number } | null>(null);
-  /** 最近一次进程退出码（任意会话），用于上抛给状态机做次级失败 badge。 */
-  const lastExitCodeRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     defaultShellRef.current = defaultShell;
@@ -335,10 +324,6 @@ export default function TerminalPane({
             if (next !== "running" && s.id === active) {
               termRef.current?.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
             }
-          }
-          // 记录最近一次非零退出码（跨会话，供状态机次级失败 badge 用）
-          if (chunk.exitCode != null && chunk.exitCode !== 0) {
-            lastExitCodeRef.current = chunk.exitCode;
           }
         }
 
@@ -569,16 +554,6 @@ export default function TerminalPane({
 
   const activeSess = sessions.find((s) => s.id === activeId) ?? null;
 
-  // 终端元数据上抛（V2）：session 列表/状态变化时同步给编排层。hasLiveProcess 由
-  // 是否存在 running 会话决定；lastExitCode 用 ref 累积（SSE 只会在进程退出时推送
-  // exitCode，避免每次 render 都触发上抛）。
-  useEffect(() => {
-    if (!onTerminalState) return;
-    onTerminalState({
-      hasLiveProcess: sessions.some((s) => s.status === "running"),
-      lastExitCode: lastExitCodeRef.current,
-    });
-  }, [sessions, onTerminalState]);
   const iconBtn =
     "flex h-6.5 w-6.5 items-center justify-center rounded-[4px] text-[#b8b8bd] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7797e8]";
 

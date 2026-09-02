@@ -1,15 +1,14 @@
 /**
  * 任务呈现派生模型（state-driven workbench UI spec §6）。
  *
- * `deriveTaskPresentation` 是纯函数：把活跃会话、对话投影、终端元数据、git/diff
- * 状态与可预览产物路径，折叠成一个六态 `TaskPresentationState`，并附带视觉所需的
+ * `deriveTaskPresentation` 是纯函数：把活跃会话、对话投影、git/diff 状态与可预览
+ * 产物路径，折叠成一个六态 `TaskPresentationState`，并附带视觉所需的
  * label / icon kind / priority / badge model。**本文件不写 JSX、不引入 React、不
  * 读写任何外部状态**，只做有序谓词表的求值，供 TaskContextStrip / SessionList /
  * WorkbenchPanel 等视觉组件消费。
  *
  * 关键约束（spec §6 明文）：
- * - running 优先于 failed（表行 3 vs 4）；agent 持续工作时命令瞬时非零退出不得把
- *   状态条翻成 failed。
+ * - running 优先于 failed（表行 3 vs 4）；Agent 持续工作时不得被历史失败态抢占。
  * - failed 与 delivered 非互斥：失败但产物在 → delivered，失败仅作次级 badge
  *   （§7.6），绝不吞掉可追溯的失败。
  * - delivered 优先于 review_ready（行 5 vs 6）：产物是比「一批编辑」更强的结果。
@@ -38,12 +37,6 @@ export type PresentationPermission = {
   permission: string;
 };
 
-/** 终端元数据（hasLiveProcess 表示存在活动 PTY 进程）。 */
-export type PresentationTerminal = {
-  hasLiveProcess: boolean;
-  lastExitCode?: number;
-};
-
 /** 纯函数输入（spec §6 PresentationContext）。 */
 export type PresentationContext = {
   sessionId: string | null;
@@ -51,7 +44,6 @@ export type PresentationContext = {
   permissionRequest: PresentationPermission | null;
   editedPaths: string[];
   previewablePaths: string[];
-  terminal: PresentationTerminal;
   /** 用户显式选定的右侧 tab（automatic/user 契约的 user 侧；此处仅记录，不影响状态派生）。 */
   explicitWorkbenchTab: "review" | "files" | "preview" | null;
   /** 用户显式选定的底部 debug tab（同上）。 */
@@ -71,9 +63,9 @@ export type IconKind =
 
 /** 次级失败 badge：delivered/review_ready 状态下仍要露出的底层失败（§7.6）。 */
 export type FailureBadge = {
-  /** 失败来源（会话失败 / 命令非零退出）。 */
-  kind: "session_failed" | "command_failed";
-  /** 简短可读提示，如「命令以非零退出」。 */
+  /** 失败来源。终端命令只属于终端面板，不改变任务状态。 */
+  kind: "session_failed";
+  /** 简短可读提示。 */
   label: string;
 };
 
@@ -128,7 +120,7 @@ type PredicateRow = {
 
 const ROWS: PredicateRow[] = [
   // 1. 无会话，或会话无有意义任务事件 → idle
-  //    （有意义事件 = 权限请求 / 编辑 / 可预览产物 / git 变更 / 活动进程之一）
+  //    （有意义事件 = 权限请求 / 编辑 / 可预览产物 / git 变更之一）
   {
     state: "idle",
     match: (ctx) =>
@@ -137,8 +129,7 @@ const ROWS: PredicateRow[] = [
         ctx.permissionRequest === null &&
         ctx.editedPaths.length === 0 &&
         ctx.previewablePaths.length === 0 &&
-        ctx.hasGitChanges !== true &&
-        !ctx.terminal.hasLiveProcess),
+        ctx.hasGitChanges !== true),
   },
   // 2. 有面向用户的权限/澄清请求，或会话本身处于等待态 → needs_input
   //
@@ -153,10 +144,11 @@ const ROWS: PredicateRow[] = [
     state: "needs_input",
     match: (ctx) => ctx.permissionRequest !== null || ctx.sessionStatus === "waiting",
   },
-  // 3. 运行中，或有活动 PTY 进程 → running（优先于 failed）
+  // 3. Agent 会话运行中 → running（优先于 failed）。交互终端的 shell 本来就是
+  //    常驻 PTY，不能把它误当成 Agent 任务运行。
   {
     state: "running",
-    match: (ctx) => ctx.sessionStatus === "running" || ctx.terminal.hasLiveProcess,
+    match: (ctx) => ctx.sessionStatus === "running",
   },
   // 4. 失败且无产物无编辑可看 → failed
   {
@@ -188,12 +180,6 @@ function deriveFailureBadge(
   if (state === "failed") return null; // failed 本身就是主态，无需次级 badge
   if (ctx.sessionStatus === "failed") {
     return { kind: "session_failed", label: "会话执行失败" };
-  }
-  if (
-    ctx.terminal.lastExitCode !== undefined &&
-    ctx.terminal.lastExitCode !== 0
-  ) {
-    return { kind: "command_failed", label: "命令以非零退出" };
   }
   return null;
 }
