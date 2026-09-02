@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { Button, Navbar } from "@zmzai/theme";
 
 import AccountBlock from "@/components/AccountBlock";
@@ -359,23 +360,20 @@ export default function SettingsPage() {
       <Navbar
         sublabel="设置"
         className="h-12"
-        actions={
-          <>
-            {toggleNavBtn}
-            <Link
-              href="/"
-              className="inline-flex h-7 items-center rounded-full px-3 text-xs text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              返回工作台
-            </Link>
-          </>
-        }
+        actions={toggleNavBtn}
       />
 
       <div className="flex min-h-0 flex-1">
         {/* 左侧导航（Qoder 式设置中心，可收起） */}
         {navOpen && (
         <aside className="flex w-56 shrink-0 flex-col border-r border-line p-3">
+          <Link
+            href="/"
+            className="mb-3 inline-flex h-9 items-center gap-2 rounded-sm px-2.5 text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            <ArrowLeft size={16} strokeWidth={1.8} aria-hidden="true" />
+            返回工作台
+          </Link>
           <nav className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-0.5">
             {PRIMARY_NAV.map((item) => (
