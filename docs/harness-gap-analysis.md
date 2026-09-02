@@ -17,13 +17,17 @@
 
 ## 二、模型层（差距最大的一档）
 
-| 能力 | 参考实现 | 现状 |
-|---|---|---|
-| 多提供商 | pi ai/ 统一 API、opencode llm/+credential/+oauth | ❌ 仅 OpenAI 兼容一个 provider |
-| 模型目录 | opencode models-dev.ts、pi 构建期生成、codex models-manager | ❌ 模型 ID 硬编码 |
-| 路由/降级 | gemini routing/+fallback/+availability | ❌ 单 provider 挂了就挂 |
-| 本地模型 | codex ollama/+lmstudio/ | ❌ |
-| 凭据管理 | codex keyring-store+secrets、opencode credential.ts | ⚠️ 仅读 .env，无加密存储 |
+> 2026-09-02 刷新：原表 5 项 ❌ 里 4 项已落地，文档曾长期落后于代码。以下为真实状态。
+
+| 能力 | 参考实现 | 现状 | 状态 |
+|---|---|---|---|
+| 多提供商 | pi ai/ 统一 API、opencode llm/+credential/+oauth | `ModelProvider` 接口（`adapters/index.ts`），`createOpenAiModelProvider` 是唯一实现；Ollama 经 `providerWithOllama` 分流 | ✅(抽象已就位) |
+| 模型目录 | opencode models-dev.ts、pi 构建期生成、codex models-manager | relay `/models` 动态拉取 + Ollama `/api/tags` 探测（2s 超时），非硬编码 | ✅ |
+| 路由/降级 | gemini routing/+fallback/+availability | framework `failoverEndpoints`（N 个）+ 首事件判健康 + `onFailover` 环形日志透出；设置页可增删改（2026-09-02 UI 化） | ✅ |
+| 本地模型 | codex ollama/+lmstudio/ | Ollama 分流 + 设置页 UI（ollamaUrl）+ Composer「本地 · Ollama」分组 | ✅ |
+| 凭据管理 | codex keyring-store+secrets、opencode credential.ts | 个人 key AES-256-GCM 加密落盘（dataDir/.secret 0600）+ 旧明文自动迁移 + 密钥轮换 | ✅ |
+
+**模型能力真实值链路（2026-09-02 闭合）**：relay `/models` 返回每模型 `maxInputTokens` / `maxOutputTokens` / `allowedReasoningEfforts`，经进程级缓存（`lib/model-caps.ts`）灌入 provider 的 `modelCaps` 回调——上下文窗口、最大输出、推理档位白名单三者全部跟模型目录走，UI 档位选择器按白名单禁用不支持的档位，从源头杜绝 `REASONING_EFFORT_NOT_ALLOWED` 400。
 
 ## 三、插件与生态
 
@@ -64,8 +68,8 @@
 4. ~~websearch / apply_patch 工具补齐~~ → **2026-08-27 落地**（websearch：Tavily/Serper/DuckDuckGo-Lite 三后端自动选择、fetch/env 可注入零网络测试；apply_patch：统一 diff 多文件多 hunk 两阶段应用，走 workspace 门面出可回滚版本）
 
 **P1 — 模型层扩展**
-5. 多 provider 抽象（pi-ai 式统一层）+ 路由/降级
-6. 本地模型（Ollama）接入，内测期零成本跑通
+5. ~~多 provider 抽象（pi-ai 式统一层）+ 路由/降级~~ → **✅ 已落地**：`ModelProvider` 接口 + failover N 端点降级 + 设置页 UI（2026-09-02 闭环）
+6. ~~本地模型（Ollama）接入，内测期零成本跑通~~ → **✅ 已落地**：Ollama `/api/tags` 探测 + 分流 + 设置页
 
 **P2 — 平台化**
 7. 把 Electron IPC 抽象成独立协议层（opencode protocol 思路），桌面/CLI/Web 共用 + headless 可编程
