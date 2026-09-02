@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
@@ -93,6 +94,7 @@ export default function TerminalPane({
   const [shells, setShells] = useState<ShellCandidate[]>([]);
   const [defaultShell, setDefaultShell] = useState<ShellCandidate | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shellMenuPosition, setShellMenuPosition] = useState<{ left: number; top: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -106,6 +108,7 @@ export default function TerminalPane({
   const streamStopRef = useRef<(() => void) | null>(null);
   const obsRef = useRef<ResizeObserver | null>(null);
   const lineBufRef = useRef(""); // pipe 模式输入缓冲
+  const shellMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queuedResizeRef = useRef<{ id: string; cols: number; rows: number } | null>(null);
   const appliedResizeRef = useRef(new Map<string, string>());
@@ -131,6 +134,38 @@ export default function TerminalPane({
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  // Shell 菜单走 portal，不能挂在可横向滚动的 tab 容器内：后者会裁掉浮层，且
+  // 原先叠在「+」上的 12px 绝对定位热区也很难准确点击。
+  const toggleShellMenu = useCallback(() => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const rect = shellMenuTriggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setShellMenuPosition({
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 208)),
+      top: rect.bottom + 4,
+    });
+    setMenuOpen(true);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    const reposition = () => setMenuOpen(false);
+    window.addEventListener("keydown", close);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("keydown", close);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [menuOpen]);
 
   const stopStream = useCallback(() => {
     streamStopRef.current?.();
@@ -564,17 +599,24 @@ export default function TerminalPane({
             );
           })}
           {backend === "pty" && (
-            <div className="relative shrink-0">
+            <div className="flex shrink-0 items-center rounded-[4px] focus-within:ring-2 focus-within:ring-[#7797e8]">
               <button type="button" title={`新建终端（${defaultShell?.label ?? "系统 shell"}）`} onClick={() => void newSession()} className={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M8 2.5v11M2.5 8h11" strokeLinecap="round" /></svg>
               </button>
-              {shells.length > 1 && <button type="button" title="选择 shell" onClick={() => setMenuOpen((v) => !v)} className="absolute -right-1 top-1/2 flex h-4 w-3 -translate-y-1/2 items-center justify-center text-[#aaaab0] hover:text-white"><svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
-              {menuOpen && <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute left-0 top-full z-20 mt-1 min-w-48 overflow-hidden rounded-[5px] border border-white/10 bg-[#252526] py-1 shadow-xl">
-                  {shells.map((sh) => <button key={sh.file} type="button" onClick={() => { setMenuOpen(false); void newSession(sh.file); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[#d4d4d4] hover:bg-[#094771]"><span>{sh.label}</span><span className="ml-auto max-w-28 truncate text-[#999]">{sh.file}</span></button>)}
-                </div>
-              </>}
+              {shells.length > 1 && (
+                <button
+                  ref={shellMenuTriggerRef}
+                  type="button"
+                  title="选择 shell 新建终端"
+                  aria-label="选择 shell 新建终端"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onClick={toggleShellMenu}
+                  className="flex h-6.5 w-5 items-center justify-center rounded-[4px] text-[#aaaab0] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none"
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 6l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -587,6 +629,34 @@ export default function TerminalPane({
       </div>
 
       <div ref={containerRef} className="min-h-0 flex-1 px-3 py-2" />
+      {menuOpen && shellMenuPosition && createPortal(
+        <>
+          <div className="fixed inset-0 z-[70]" aria-hidden="true" onPointerDown={() => setMenuOpen(false)} />
+          <div
+            role="menu"
+            aria-label="选择 shell"
+            className="fixed z-[71] w-52 overflow-hidden rounded-[5px] border border-white/10 bg-[#252526] py-1 shadow-xl"
+            style={shellMenuPosition}
+          >
+            {shells.map((sh) => (
+              <button
+                key={sh.file}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void newSession(sh.file);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[#d4d4d4] hover:bg-[#094771] focus:bg-[#094771] focus:outline-none"
+              >
+                <span>{sh.label}</span>
+                <span className="ml-auto max-w-28 truncate text-[#999]">{sh.file}</span>
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
     </div>
   );
 }
