@@ -352,7 +352,7 @@ export default function SettingsPage() {
         {/* 左侧导航（Qoder 式设置中心，可收起） */}
         {navOpen && (
         <aside className="flex w-56 shrink-0 flex-col border-r border-line p-3">
-          <nav className="space-y-0.5">
+          <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
             {NAV.map((item) => (
               <button
                 key={item.id}
@@ -368,8 +368,10 @@ export default function SettingsPage() {
             ))}
           </nav>
 
-          {/* 底部账户块（与工作台共用）：头像 + 用户名 + 更多菜单 */}
-          <AccountBlock onChange={() => refreshRelayKeys()} />
+          {/* 底部账户块独立锚定：导航增长时只滚导航，账户始终贴住侧栏底部。 */}
+          <div className="mt-auto pt-3">
+            <AccountBlock onChange={() => refreshRelayKeys()} />
+          </div>
 
         </aside>
         )}
