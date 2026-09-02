@@ -373,6 +373,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleBottomPanel]);
 
+  // Electron 的 ⌘W 由主进程截获后从 preload 回送到这里。终端是当前唯一有
+  // 多实例 tab 的区域：焦点在其任意部分时优先关闭活动 shell，而不是退出 App。
+  useEffect(() => {
+    const closeFocusedPane = () => {
+      const focused = document.activeElement as HTMLElement | null;
+      if (focused?.closest("[data-terminal-pane]")) {
+        window.dispatchEvent(new Event("lectern:close-active-terminal"));
+      }
+    };
+    const remove = window.lecternNative?.onCloseFocusedPane?.(closeFocusedPane);
+    return () => remove?.();
+  }, []);
+
   // 后台动态检测（P2-15 续）：非激活会话 running→false 转换即登记（列表徽标 +
   // 隐藏窗口时通知/提示音）；激活会话的完成提示由 SSE session.status 链路负责。
   useEffect(() => {

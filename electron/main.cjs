@@ -227,6 +227,15 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  // ⌘W 在 Electron/macOS 默认会关闭整个 BrowserWindow。这里优先把它交给
+  // 工作台处理（例如焦点在 xterm 时关闭当前 terminal tab）；即使当前区域没有
+  // 可关闭对象，也不能意外退出整个 Lectern。
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    if (!(input.meta || input.control) || input.key.toLowerCase() !== "w") return;
+    event.preventDefault();
+    win.webContents.send("workbench:close-focused-pane");
+  });
   void win.loadURL(WEB_URL);
 }
 

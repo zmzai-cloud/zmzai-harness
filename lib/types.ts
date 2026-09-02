@@ -257,6 +257,8 @@ export type LecternNativeBridge = {
   openAuthWindow?: () => Promise<string | null>;
   /** 订阅 SSO 会话 cookie：主进程捕获 auth 域会话 cookie 后推送。 */
   onSsoCookie?: (callback: (value: string) => void) => void;
+  /** ⌘W 被宿主截获后调用；回调由前端按当前焦点关闭对应 pane。 */
+  onCloseFocusedPane?: (callback: () => void) => () => void;
 };
 
 declare global {

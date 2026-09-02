@@ -16,4 +16,11 @@ contextBridge.exposeInMainWorld("lecternNative", {
   onSsoCookie: (callback) => {
     ipcRenderer.on("auth:ssoCookie", (_event, value) => callback(value));
   },
+
+  /** Electron 主进程截获 ⌘W 后转交工作台：由当前焦点区域决定关闭哪个对象。 */
+  onCloseFocusedPane: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("workbench:close-focused-pane", handler);
+    return () => ipcRenderer.removeListener("workbench:close-focused-pane", handler);
+  },
 });
