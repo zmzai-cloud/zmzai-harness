@@ -4,6 +4,7 @@
  * 同域 cookie 透传过去，即「登录一次，全链路可用」。
  */
 
+import { primeModelCaps } from "./model-caps";
 import { getSettings } from "./settings";
 
 // relay 端点优先级：设置页配置（settings.json）> RELAY_URL > OPENAI_BASE_URL > 本机。
@@ -93,9 +94,14 @@ export async function relayLogout(cookie: string | null): Promise<boolean> {
   }
 }
 
-/** 模型目录 + 用户配置（featured/channels），未登录返回 null。 */
-export function relayModels(cookie: string | null): Promise<ModelsResponse | null> {
-  return relayGet<ModelsResponse>("/models", cookie);
+/** 模型目录 + 用户配置（featured/channels），未登录返回 null。
+ *  顺带把每个模型的真实上下文窗口灌进进程内缓存——provider 的 getModel 是
+ *  同步契约，只能查缓存；resolveModel 链路（建会话 / prompt / rewind）都经过
+ *  这里，因此真实能力在这些路径上首次即可生效，且不产生额外请求。 */
+export async function relayModels(cookie: string | null): Promise<ModelsResponse | null> {
+  const data = await relayGet<ModelsResponse>("/models", cookie);
+  primeModelCaps(data?.models);
+  return data;
 }
 
 /** 把 relay 模型目录映射为 UI 的 AgentInfo 列表：优先用户配置的 featured

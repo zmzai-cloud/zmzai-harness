@@ -2,8 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { sessionCookieFrom } from "@/lib/request-cookie";
 import { authHeaders, ollamaBase } from "@/lib/settings";
+import { primeModelCaps } from "@/lib/model-caps";
 import { failoverLog } from "@/lib/runtime";
-import { relayBase } from "@/lib/relay";
+import { relayBase, type RelayModel } from "@/lib/relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +19,12 @@ export async function GET(request: NextRequest) {
   try {
     const res = await fetch(`${relayBase()}/models`, { headers, cache: "no-store" });
     // relay 成功响应不含 authenticated 字段，需显式补上（否则 composer 误判未接入）
-    if (res.ok) relay = { ...(await res.json() as object), authenticated: true };
+    if (res.ok) {
+      const data = (await res.json()) as { models?: RelayModel[] };
+      // 模型选择器是 UI 首次触达目录的路径，顺手把真实窗口灌进进程内缓存
+      primeModelCaps(data.models);
+      relay = { ...data, authenticated: true };
+    }
   } catch {
     // relay 不可达：保留空目录，Ollama 模型仍可用
   }

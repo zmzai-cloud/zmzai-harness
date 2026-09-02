@@ -27,6 +27,7 @@ import {
 } from "@zmzai/agent-framework";
 import { currentCookieHeader } from "./request-cookie";
 import { authHeaders, ollamaBase } from "./settings";
+import { capsFor } from "./model-caps";
 import { relayBase } from "./relay";
 import { loadMcpConfig } from "./mcp-config";
 import { dataDirFor, getActiveProject, listProjects, projectStore } from "./projects";
@@ -223,6 +224,9 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
       baseUrl: () => relayBase(),
       // 鉴权头：个人 key（Bearer）优先，否则透传浏览器登录 cookie
       headers: async () => authHeaders(currentCookieHeader()),
+      // 真实模型能力：查进程内缓存（由 /api/models 与 resolveModel 链路灌入）。
+      // 未命中回落 provider 默认的 128k/16k——与不配置时行为一致。
+      modelCaps: (modelId) => capsFor(modelId),
       // 路由降级（N2a）：主端点首个流事件即报错时依次切备用端点
       failoverEndpoints: failoverEndpointsFromEnv(),
       // 降级可观测（P0）：切换事件进环形日志，/api/models 透出给 UI
