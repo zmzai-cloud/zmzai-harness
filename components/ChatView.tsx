@@ -239,6 +239,8 @@ type Props = {
   onWorktreeAction?: (action: "merge" | "discard") => Promise<void>;
   /** 隔离操作结果横幅（page.tsx 持有，8s 自动消退）。 */
   wtNotice?: { kind: "ok" | "error"; text: string } | null;
+  /** 回溯重发：编辑某条用户消息并从此重跑（page.tsx 调 API，截断 + 重跑由服务端完成）。 */
+  onRewind: (messageId: string, text: string) => void;
 };
 
 /** 任务计划卡：todo.updated 投影（Agent 拆解步骤的实时进度）。 */
@@ -389,7 +391,7 @@ function SummaryCard({ summary, onFollowUp, timeline }: { summary: SessionSummar
   );
 }
 
-export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice }: Props) {
+export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice, onRewind }: Props) {
   const { messages, todos, reads, summary, editedPaths, checkpoint } = data;
   // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
@@ -459,8 +461,20 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
     return () => clearInterval(t);
   }, [downSince]);
   const messagesRef = useRef<HTMLDivElement | null>(null);
-  // 用户消息「编辑重发」草稿：回填给 Composer，消费后清空
-  const [draft, setDraft] = useState<string | null>(null);
+  // 用户消息「编辑重发」原位编辑态：气泡变 textarea，保存即截断重跑
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  // 保存编辑：确认后交 page.tsx 调 rewind API（服务端截断 + 重跑）
+  const saveEdit = () => {
+    if (!editing) return;
+    const next = editing.text.trim();
+    if (!next) {
+      setEditing(null); // 清空文本 = 放弃编辑
+      return;
+    }
+    if (!window.confirm("保存并从此消息重新执行？此消息之后的全部消息将被删除。")) return;
+    setEditing(null);
+    onRewind(editing.id, next);
+  };
   // 历史翻页的视口锚定：prepend 后恢复滚动位置；平时新消息到达滚到底部
   const anchorRef = useRef<{ height: number; top: number } | null>(null);
   const handleLoadMore = () => {
@@ -659,11 +673,48 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
           const isAssistant = m.role === "assistant";
           const lastActive = isAssistant && idx === visible.length - 1 && running;
           if (!isAssistant) {
-            // IDE 式用户消息：右侧浅色圆角气泡（含图片附件内联展示） + hover 操作（复制/编辑回填）
+            // IDE 式用户消息：右侧浅色圆角气泡（含图片附件内联展示） + hover 操作（复制/编辑重发）
             const text = m.parts
               .map((p) => (p.part.type === "text" ? p.part.text : ""))
               .join("");
             const imageParts = m.parts.filter((p) => p.part.type === "image" && p.part.url);
+            if (editing?.id === m.id) {
+              // 原位编辑态：气泡变 textarea，保存即回溯重跑（服务端截断该消息之后的历史）
+              return (
+                <div key={m.id} className="flex justify-end">
+                  <div className="w-[85%]">
+                    <textarea
+                      autoFocus
+                      value={editing.text}
+                      onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                      onKeyDown={(e) => {
+                        // Cmd/Ctrl+Enter 保存；Escape 取消
+                        if (e.key === "Escape") setEditing(null);
+                        else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveEdit();
+                      }}
+                      rows={Math.min(12, Math.max(2, editing.text.split("\n").length))}
+                      className="w-full resize-y rounded-lg border border-accent bg-surface px-3 py-2 text-[0.875rem] leading-[1.65] text-ink outline-none"
+                    />
+                    <div className="mt-1.5 flex justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(null)}
+                        className="rounded-md px-2.5 py-1 text-xs text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveEdit}
+                        className="rounded-md bg-accent px-2.5 py-1 text-xs text-accent-ink transition-opacity hover:opacity-90"
+                      >
+                        保存并重跑
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={m.id} className="group flex justify-end [content-visibility:auto] [contain-intrinsic-size:auto_120px]">
                 <div className="relative max-w-[85%]">
@@ -692,16 +743,18 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
                         <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" strokeLinecap="round" />
                       </svg>
                     </button>
-                    <button
-                      type="button"
-                      title="编辑重发"
-                      onClick={() => setDraft(text)}
-                      className="flex h-6 w-6 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-                        <path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5 12.8l-3 .7.7-3 8.6-8.2z" strokeLinejoin="round" />
-                      </svg>
-                    </button>
+                    {!running && (
+                      <button
+                        type="button"
+                        title="编辑重发（截断此消息之后的对话并重新执行）"
+                        onClick={() => setEditing({ id: m.id, text })}
+                        className="flex h-6 w-6 items-center justify-center rounded-sm text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                          <path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5 12.8l-3 .7.7-3 8.6-8.2z" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -859,8 +912,6 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
         onSelectModel={onSelectModel}
         onSend={onSend}
         onAbort={onAbort}
-        draft={draft}
-        onDraftConsumed={() => setDraft(null)}
       />
     </div>
   );

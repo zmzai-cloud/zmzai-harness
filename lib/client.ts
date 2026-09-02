@@ -193,6 +193,10 @@ export const client = {
   compact: (sessionId: string) =>
     post(`/api/sessions/${sessionId}/compact`).then((r) => j<{ ok: boolean; reason?: string }>(r)),
 
+  /** 回溯重发：删除目标用户消息及其后的全部消息，以（可编辑后的）文本重跑。 */
+  rewind: (sessionId: string, messageId: string, text?: string) =>
+    post(`/api/sessions/${sessionId}/rewind`, { messageId, ...(text != null ? { text } : {}) }).then((r) => j<{ ok: boolean }>(r)),
+
   gitDiff: (path?: string, sessionId?: string | null) => {
     const query = new URLSearchParams();
     if (path) query.set("path", path);

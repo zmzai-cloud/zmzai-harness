@@ -31,9 +31,6 @@ type Props = {
   onSelectModel: (m: ModelRef | null) => void;
   onSend: (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort) => void;
   onAbort: () => void;
-  /** 外部回填草稿（用户消息「编辑重发」）；消费后回调清空。 */
-  draft: string | null;
-  onDraftConsumed: () => void;
 };
 
 /**
@@ -42,7 +39,7 @@ type Props = {
  * SKILL.md 的 markdown 随本次 prompt 注入（与 framework PluginSkill 同源约定）；
  * 推理力度随本次 prompt 下发（relay reasoning_effort，framework thinkingLevel）。
  */
-export default function Composer({ sessionId, running, selectedModel, onSelectModel, onSend, onAbort, draft, onDraftConsumed }: Props) {
+export default function Composer({ sessionId, running, selectedModel, onSelectModel, onSend, onAbort }: Props) {
   const [text, setText] = useState("");
   const [models, setModels] = useState<ModelsState | null>(null);
   const [skills, setSkills] = useState<SkillOption[]>([]);
@@ -69,18 +66,6 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     void client.listModels().then(setModels).catch(() => undefined);
     void client.listSkills().then((r) => setSkills(r.skills)).catch(() => undefined);
   }, []);
-
-  // 编辑重发：草稿回填并聚焦
-  useEffect(() => {
-    if (draft == null) return;
-    setText(draft);
-    onDraftConsumed();
-    const el = textareaRef.current;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(draft.length, draft.length);
-    }
-  }, [draft, onDraftConsumed]);
 
   // @ 引用：按已输入路径懒加载目录，按最后一段过滤
   useEffect(() => {

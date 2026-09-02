@@ -612,6 +612,20 @@ export default function App() {
     [activeId],
   );
 
+  // 回溯重发：ChatView 原位编辑保存后调用（确认弹窗在 ChatView 内）。
+  // 服务端截断转录 + 落 session.rewound 事件 + 重跑；投影由 SSE 事件流驱动更新。
+  const handleRewind = useCallback(
+    async (messageId: string, text: string) => {
+      if (!activeId) return;
+      try {
+        await client.rewind(activeId, messageId, text);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : "回溯失败");
+      }
+    },
+    [activeId],
+  );
+
   const reply = useCallback(
     async (r: "once" | "always" | "reject", feedback?: string) => {
       if (!activeId || !pending) return;
@@ -766,6 +780,7 @@ export default function App() {
               isolation={activeIsolation}
               onWorktreeAction={handleWorktreeAction}
               wtNotice={wtNotice}
+              onRewind={handleRewind}
             />
             {workbenchOpen && (
               <div className="hidden min-[1180px]:contents">

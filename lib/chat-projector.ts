@@ -158,6 +158,21 @@ export class ChatProjector {
     } else if (ev.type === "session.checkpoint") {
       // 长任务中途进度快照（N6）：运行中的「中间落点」，覆盖式保留最新。
       this.checkpoint = ev.data as SessionCheckpoint;
+    } else if (ev.type === "session.rewound") {
+      // 回溯重发：宿主已截断转录，这里同步裁掉目标消息及其后的本地状态。
+      // 重放场景（断线重连 from seq 0）旧事件先重建旧状态、rewound 再裁掉、
+      // 新 run 事件接着建新分支——最终态与最新转录一致。目标不在当前投影
+      // （如刚整页刷新、历史转录已截断）时为幂等 no-op。
+      const d = ev.data as { fromMessageId: string };
+      const idx = this.order.indexOf(d.fromMessageId);
+      if (idx >= 0) {
+        for (const id of this.order.slice(idx)) this.messages.delete(id);
+        this.order = this.order.slice(0, idx);
+      }
+      // 被删 run 的派生状态一并清掉，避免残留旧「任务小结/断点」误导续跑
+      this.summary = null;
+      this.checkpoint = null;
+      this.todos = null;
     } else if (ev.type === "subagent.started") {
       const d = ev.data as { id: string };
       this.subagentActivity.set(d.id, { steps: [] });
