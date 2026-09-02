@@ -46,6 +46,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   if (!target || target.info.role !== "user") {
     return NextResponse.json({ error: "目标消息不存在或不是用户消息" }, { status: 404 });
   }
+  const selectedSkill = target.info.skill;
   const originalText = target.parts
     .filter((p) => p.type === "text")
     .map((p) => p.text)
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
         agent: target.info.agent,
         model,
         ...(images.length > 0 ? { images } : {}),
+        ...(selectedSkill ? { skill: selectedSkill } : {}),
       }),
     );
     return NextResponse.json({ ok: true });

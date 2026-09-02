@@ -1,4 +1,4 @@
-import type { LecternEvent, Part, TranscriptMessage, SessionSummary } from "./types";
+import type { LecternEvent, Part, SelectedSkill, TranscriptMessage, SessionSummary } from "./types";
 
 /** ChatView 消息树的数据类型与投影器。
  *
@@ -12,7 +12,7 @@ export type TodoItem = { content: string; status: "pending" | "in_progress" | "c
 export type SubagentStep = { tool: string; title?: string; state?: string };
 export type SubagentActivity = { steps: SubagentStep[]; finished?: { state: string; durationMs?: number; toolCalls?: number } };
 export type UiPart = { part: Part; diff?: string; subagent?: SubagentActivity };
-export type UiMessage = { id: string; role: string; parts: UiPart[]; error?: { name: string; message: string } };
+export type UiMessage = { id: string; role: string; parts: UiPart[]; skill?: SelectedSkill; error?: { name: string; message: string } };
 
 export type ChatViewData = {
   messages: UiMessage[];
@@ -44,7 +44,7 @@ export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads:
 export function transcriptToEvents(messages: TranscriptMessage[]): LecternEvent[] {
   const out: LecternEvent[] = [];
   for (const m of messages) {
-    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role, ...(m.info.error ? { error: m.info.error } : {}) } } });
+    out.push({ type: "message.updated", data: { message: { id: m.info.id, role: m.info.role, ...(m.info.skill ? { skill: m.info.skill } : {}), ...(m.info.error ? { error: m.info.error } : {}) } } });
     for (const p of m.parts) {
       out.push({ type: "message.part.updated", data: { part: p } });
     }
@@ -52,7 +52,7 @@ export function transcriptToEvents(messages: TranscriptMessage[]): LecternEvent[
   return out;
 }
 
-type InternalMessage = { id: string; role: string; parts: Map<string, UiPart>; error?: { name: string; message: string } };
+type InternalMessage = { id: string; role: string; parts: Map<string, UiPart>; skill?: SelectedSkill; error?: { name: string; message: string } };
 
 export class ChatProjector {
   private messages = new Map<string, InternalMessage>();
@@ -85,13 +85,13 @@ export class ChatProjector {
   /** 折叠单个事件（分支逻辑与原 project() 逐条对应，行为保持不变）。 */
   ingest(ev: LecternEvent): void {
     if (ev.type === "message.updated") {
-      const m = (ev.data as { message: { id: string; role: string; error?: { name: string; message: string } } }).message;
+      const m = (ev.data as { message: { id: string; role: string; skill?: SelectedSkill; error?: { name: string; message: string } } }).message;
       const existing = this.messages.get(m.id);
       if (existing) {
         // 失败收尾会补发带 error 的 message.updated——保留最新错误供 UI 展示
         if (m.error) existing.error = m.error;
       } else {
-        this.messages.set(m.id, { id: m.id, role: m.role, parts: new Map(), ...(m.error ? { error: m.error } : {}) });
+        this.messages.set(m.id, { id: m.id, role: m.role, parts: new Map(), ...(m.skill ? { skill: m.skill } : {}), ...(m.error ? { error: m.error } : {}) });
         this.order.push(m.id);
       }
     } else if (ev.type === "message.part.updated") {
@@ -213,7 +213,7 @@ export class ChatProjector {
     return {
       messages: this.order.map((id) => {
         const m = this.messages.get(id)!;
-        return { id: m.id, role: m.role, parts: [...m.parts.values()], ...(m.error ? { error: m.error } : {}) };
+        return { id: m.id, role: m.role, parts: [...m.parts.values()], ...(m.skill ? { skill: m.skill } : {}), ...(m.error ? { error: m.error } : {}) };
       }),
       todos: this.todos,
       reads: this.reads.slice(0, 8),

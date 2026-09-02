@@ -221,7 +221,7 @@ type Props = {
   hasMore: boolean;
   onLoadMore: () => void;
   /** 乐观回显：发送瞬间的用户消息（真实 message.updated 到达后自动让位）。 */
-  echo: { text: string; images: { url: string; mediaType: string }[] } | null;
+  echo: { text: string; images: { url: string; mediaType: string }[]; skill?: { id: string; name: string } } | null;
   /** 隔离操作结果横幅（page.tsx 持有，8s 自动消退）。 */
   wtNotice?: { kind: "ok" | "error"; text: string } | null;
   /** 回溯重发：编辑某条用户消息并从此重跑（page.tsx 调 API，截断 + 重跑由服务端完成）。 */
@@ -382,13 +382,20 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
   const visible = useMemo(() => {
     if (!echo) return messages;
-    const echoed = messages.some(
+    const echoed = messages.find(
       (m) => m.role === "user" && m.parts.map((p) => (p.part.type === "text" ? p.part.text : "")).join("") === echo.text,
     );
-    if (echoed) return messages;
+    // SSE 的真实消息抵达会取代乐观回显。若旧 runner / 短暂版本切换未带回
+    // skill 元数据，把本次发送时已知的选择合并进去，避免 skill 前缀闪现后消失。
+    if (echoed) {
+      const fallbackSkill = echo.skill;
+      if (!fallbackSkill || echoed.skill) return messages;
+      return messages.map((message) => message.id === echoed.id ? { ...message, skill: { ...fallbackSkill, digest: "" } } : message);
+    }
     const echoMessage: UiMessage = {
       id: "__echo__",
       role: "user",
+      ...(echo.skill ? { skill: { ...echo.skill, digest: "" } } : {}),
       parts: [
         ...echo.images.map((im, i) => ({ part: { id: `__echo_img_${i}`, type: "image", url: im.url, mediaType: im.mediaType, messageId: "__echo__", sessionId: "" } as Part })),
         ...(echo.text ? [{ part: { id: "__echo_text", type: "text", text: echo.text, messageId: "__echo__", sessionId: "" } as Part }] : []),
@@ -628,6 +635,15 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
               <div key={m.id} className="group flex justify-end [content-visibility:auto] [contain-intrinsic-size:auto_120px]">
                 <div className="relative max-w-[85%]">
                   <div className="whitespace-pre-wrap rounded-lg rounded-br-sm bg-surface-2 px-3.5 py-2.5 text-[0.875rem] leading-[1.65] text-ink">
+                    {m.skill && (
+                      <div className="mb-1.5 flex items-center gap-1.5 text-[0.8125rem] leading-5">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" className="shrink-0 text-accent">
+                          <path d="m8 1.8 5 2.9v6.6l-5 2.9-5-2.9V4.7l5-2.9Z" /><path d="m3 4.7 5 2.9 5-2.9M8 7.6v6.6" />
+                        </svg>
+                        <span className="font-medium text-accent">{m.skill.name}</span>
+                        <span className="text-ink">{text}</span>
+                      </div>
+                    )}
                     {imageParts.length > 0 && (
                       <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                         {imageParts.map((p) =>
@@ -638,7 +654,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
                         )}
                       </div>
                     )}
-                    {text}
+                    {!m.skill && text}
                   </div>
                   <div className="absolute -left-14 top-1 hidden items-center gap-0.5 group-hover:flex">
                     <button

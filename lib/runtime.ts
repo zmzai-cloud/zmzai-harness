@@ -24,6 +24,7 @@ import {
   type ModelProvider,
   type ModelRef,
   type SqliteSessionStore,
+  type ToolContext,
 } from "@zmzai/agent-framework";
 import { currentCookieHeader } from "./request-cookie";
 import { authHeaders, ollamaBase, getFailoverEndpoints } from "./settings";
@@ -33,6 +34,7 @@ import { loadMcpConfig } from "./mcp-config";
 import { dataDirFor, getActiveProject, listProjects, projectStore } from "./projects";
 import { worktreeForSession } from "./worktree";
 import { dataDir as baseDataDir, defaultWorkspaceRoot } from "./runtime-constants";
+import { listSkills, loadSkill } from "./skills";
 
 /**
  * 同构运行时（Web/App 共用的服务端）：
@@ -208,7 +210,24 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
   // git 工具直接跑本机真实仓库（沙箱快照是隔离副本，git 操作会丢上下文）；
   // 终端工具用宿主后端（node-pty 可用即真 PTY，否则降级管道模式）。
   // repo_map（R1）由 createAgentRuntime 能力接线自动注入，不再手工注册。
+  // OpenCode-style progressive disclosure: the model sees metadata in the tool
+  // description and receives a SKILL.md body only after asking for its stable id.
+  const skillCatalog = listSkills(root);
+  const skillTool = {
+    id: "skill",
+    label: "Skill",
+    description: `Load a specialized skill only when needed. Available skills:\n${skillCatalog.map((skill) => `- ${skill.id}: ${skill.name}${skill.description ? ` — ${skill.description}` : ""}`).join("\n")}`,
+    parametersJsonSchema: { type: "object", properties: { id: { type: "string", enum: skillCatalog.map((skill) => skill.id) } }, required: ["id"], additionalProperties: false },
+    permission: () => null,
+    async execute(args: Record<string, unknown>, _ctx: ToolContext) {
+      const id = typeof args.id === "string" ? args.id : "";
+      const skill = loadSkill(root, id);
+      if (!skill) throw new Error("Skill 不存在、不可读取或已变更");
+      return { title: `已加载 Skill · ${skill.name}`, output: `<skill id="${skill.id}" name="${skill.name}">\n${skill.markdown}\n</skill>`, metadata: { skillId: skill.id } };
+    },
+  };
   const baseLocalTools = [
+    skillTool,
     ...createGitTools({ cwd: wsRoot }),
     ...createTerminalTools(terminalManager(), { workspaceRoot: wsRoot }),
   ];
@@ -284,6 +303,13 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
       loadWorkspaceAgents: async () => {
         const { agents } = await loadCustomAgents(createFsWorkspaceFiles({ root }));
         return agents;
+      },
+      resolveMandatorySkill: async (_session, selected) => {
+        const skill = loadSkill(root, selected.id);
+        if (!skill || skill.digest !== selected.digest) throw new Error("选中的 Skill 已变更、删除或不可读取；请重新选择后发送");
+        return {
+          context: `<mandatory-skill id="${skill.id}" name="${skill.name}">\n${skill.markdown}\n</mandatory-skill>\nThis skill was explicitly selected by the user. Follow it for this run.`,
+        };
       },
     },
   });

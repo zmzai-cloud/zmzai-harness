@@ -208,7 +208,7 @@ export default function App() {
   const rafRef = useRef<number | null>(null);
   const [chatData, setChatData] = useState<ChatViewData>(EMPTY_CHAT_VIEW);
   // 乐观回显：send 时暂存本条用户消息，切会话后作废
-  const [echo, setEcho] = useState<{ text: string; images: { url: string; mediaType: string }[] } | null>(null);
+  const [echo, setEcho] = useState<{ text: string; images: { url: string; mediaType: string }[]; skill?: { id: string; name: string } } | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [pending, setPending] = useState<PermissionRequest | null>(null);
   // 后台会话动态（P2-15 续）：id → 结束态；点击会话清除
@@ -639,7 +639,7 @@ export default function App() {
   }, [newSession]);
 
   const send = useCallback(
-    async (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort) => {
+    async (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort, skill?: { id: string; name: string }) => {
       if (!text.trim() && !images?.length) return;
       // 无会话时自动建（composer 不再强制先选会话）
       let sid = activeId;
@@ -652,12 +652,12 @@ export default function App() {
         sid = s.id;
       }
       // 乐观回显：发送瞬间显示用户气泡，真实 message.updated 到达后自动让位
-      setEcho({ text, images: images ?? [] });
+      setEcho({ text, images: images ?? [], ...(skill ? { skill } : {}) });
       // P1-9 任务前自动快照（git 仓库且有变更时才落 commit；失败不阻塞发送）
       void client.checkpointCreate(`任务前快照 · ${text.trim().slice(0, 30) || "图片任务"}`, sid).catch(() => undefined);
       // per-prompt 模型/推理力度覆盖：composer 选了则随本条消息下发，否则跟随代理默认
       try {
-        await client.prompt(sid, text, activeAgent, selectedModel ?? undefined, images, effort);
+        await client.prompt(sid, text, activeAgent, selectedModel ?? undefined, images, effort, skill?.id);
       } catch {
         setEcho(null); // 发送失败：撤回乐观气泡，错误经其它途径提示
       }

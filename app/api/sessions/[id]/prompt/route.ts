@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveModel, sessionCookieName } from "@/lib/relay";
-import { sessionRuntime } from "@/lib/runtime";
+import { sessionRuntime, workspaceRootForSession } from "@/lib/runtime";
 import { withRequestCookie } from "@/lib/request-cookie";
 import { generateSessionTitle } from "@/lib/session-title";
+import { loadSkill } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +22,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     model?: { providerId: string; modelId: string };
     images?: { url: string; mediaType: string }[];
     effort?: string;
+    skillId?: string;
   } | null;
   const text = body?.text?.trim() ?? "";
   const effort = (EFFORTS as readonly string[]).includes(body?.effort ?? "") ? (body?.effort as Effort) : undefined;
@@ -36,6 +38,8 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
 
   const model = body?.model ?? (await resolveModel(body?.agent, cookieHeader));
   const runtime = sessionRuntime(id);
+  const selected = body?.skillId ? loadSkill(workspaceRootForSession(id), body.skillId) : null;
+  if (body?.skillId && !selected) return NextResponse.json({ error: "选中的 Skill 不存在、不可读取或超过大小限制" }, { status: 422 });
 
   // 自动标题（两段式）：①先落占位标题（首条消息摘要，立即生效不叫「新会话」）；
   // ②prompt 发出后异步调 LLM 生成 AI 摘要标题覆盖（见 lib/session-title.ts）。
@@ -56,7 +60,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
 
   try {
     await withRequestCookie(cookieHeader, () =>
-      runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}) }),
+      runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}), ...(selected ? { skill: { id: selected.id, name: selected.name, digest: selected.digest } } : {}) }),
     );
     // AI 摘要标题：后台生成不阻塞响应；仅当标题仍是占位时覆盖
     if (autoTitleSeed && text) {

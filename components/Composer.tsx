@@ -29,7 +29,7 @@ type Props = {
   running: boolean;
   selectedModel: ModelRef | null;
   onSelectModel: (m: ModelRef | null) => void;
-  onSend: (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort) => void;
+  onSend: (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort, skill?: { id: string; name: string }) => void;
   onAbort: () => void;
 };
 
@@ -68,7 +68,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
   // 模型目录与技能列表（会话无关，进页面拉一次）
   useEffect(() => {
     void client.listModels().then(setModels).catch(() => undefined);
-    void client.listSkills().then((r) => setSkills(r.skills)).catch(() => undefined);
+    void client.listSkills(sessionId).then((r) => setSkills(r.skills)).catch(() => undefined);
   }, []);
 
   // @ 引用：按已输入路径懒加载目录，按最后一段过滤。
@@ -249,16 +249,6 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       return;
     }
     let full = body || "（见附件图片）";
-    if (skill) {
-      try {
-        const { skill: loaded } = await client.getSkill(skill.id);
-        if (!loaded.markdown) throw new Error("Skill 内容为空");
-        full += `\n\n---\n\n<skill name="${loaded.name}">\n${loaded.markdown}\n</skill>`;
-      } catch (err) {
-        setImgNotice(err instanceof Error ? `无法读取 Skill：${err.message}` : "无法读取选中的 Skill");
-        return;
-      }
-    }
     // @ 引用的文件收集为上下文提示（agent 有 fs 工具，按路径自行读取）
     const refs = [...body.matchAll(/(^|\s)@([^\s@]+)/g)].map((m) => m[2]);
     if (refs.length > 0) {
@@ -268,6 +258,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
       full,
       images.map((im) => ({ url: im.url, mediaType: im.mediaType })),
       effort === "off" ? undefined : effort,
+      skill ? { id: skill.id, name: skill.name } : undefined,
     );
     setText("");
     setSkill(null);

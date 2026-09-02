@@ -82,7 +82,8 @@ export type SessionSummary = {
 };
 
 /** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
-export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string } }; parts: Part[] };
+export type SelectedSkill = { id: string; name: string; digest: string };
+export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string }; skill?: SelectedSkill }; parts: Part[] };
 
 export type AuthStatus = {
   loggedIn: boolean;
@@ -179,7 +180,7 @@ export type ModelsState = {
 
 /** 本机 / 工作区可发现的 Skill。列表不下发正文，选中时才按 id 读取。 */
 export type SkillSource = "workspace" | "codex" | "agents";
-export type SkillOption = { id: string; name: string; description?: string; source: SkillSource; markdown?: string };
+export type SkillOption = { id: string; name: string; description?: string; source: SkillSource; digest?: string; markdown?: string };
 
 /** 会话上下文用量：取最近一次 step-finish 的 input+output+cacheRead ≈ 窗口占用。 */
 export type UsageInfo = {

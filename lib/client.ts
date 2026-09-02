@@ -114,7 +114,8 @@ export const client = {
     model?: ModelRef,
     images?: { url: string; mediaType: string }[],
     effort?: ThinkingEffort,
-  ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort }).then((r) => j<{ ok: boolean }>(r)),
+    skillId?: string,
+  ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort, skillId }).then((r) => j<{ ok: boolean }>(r)),
 
   replyPermission: (
     sessionId: string,
@@ -184,7 +185,7 @@ export const client = {
 
   listModels: () => fetch("/api/models").then((r) => j<ModelsState>(r)),
 
-  listSkills: () => fetch("/api/skills").then((r) => j<{ skills: SkillOption[] }>(r)),
+  listSkills: (sessionId?: string | null) => fetch(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`).then((r) => j<{ skills: SkillOption[] }>(r)),
 
   getSkill: (id: string) =>
     fetch(`/api/skills?id=${encodeURIComponent(id)}`).then((r) => j<{ skill: SkillOption }>(r)),
