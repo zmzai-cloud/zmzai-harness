@@ -83,7 +83,7 @@ export type SessionSummary = {
 
 /** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
 export type SelectedSkill = { id: string; name: string; digest: string };
-export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string }; skill?: SelectedSkill }; parts: Part[] };
+export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string }; skill?: SelectedSkill; references?: string[] }; parts: Part[] };
 
 export type AuthStatus = {
   loggedIn: boolean;

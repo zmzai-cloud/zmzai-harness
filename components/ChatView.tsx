@@ -221,7 +221,7 @@ type Props = {
   hasMore: boolean;
   onLoadMore: () => void;
   /** 乐观回显：发送瞬间的用户消息（真实 message.updated 到达后自动让位）。 */
-  echo: { text: string; images: { url: string; mediaType: string }[]; skill?: { id: string; name: string } } | null;
+  echo: { text: string; images: { url: string; mediaType: string }[]; skill?: { id: string; name: string }; references?: string[] } | null;
   /** 隔离操作结果横幅（page.tsx 持有，8s 自动消退）。 */
   wtNotice?: { kind: "ok" | "error"; text: string } | null;
   /** 回溯重发：编辑某条用户消息并从此重跑（page.tsx 调 API，截断 + 重跑由服务端完成）。 */
@@ -396,6 +396,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
       id: "__echo__",
       role: "user",
       ...(echo.skill ? { skill: { ...echo.skill, digest: "" } } : {}),
+      ...(echo.references?.length ? { references: echo.references } : {}),
       parts: [
         ...echo.images.map((im, i) => ({ part: { id: `__echo_img_${i}`, type: "image", url: im.url, mediaType: im.mediaType, messageId: "__echo__", sessionId: "" } as Part })),
         ...(echo.text ? [{ part: { id: "__echo_text", type: "text", text: echo.text, messageId: "__echo__", sessionId: "" } as Part }] : []),
@@ -644,6 +645,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
                         <span className="text-ink">{text}</span>
                       </div>
                     )}
+                    {m.references?.length ? <div className="mb-1.5 flex flex-wrap gap-1">{m.references.map((path) => <span key={path} className="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-[0.625rem] text-ink-2">@{path}</span>)}</div> : null}
                     {imageParts.length > 0 && (
                       <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                         {imageParts.map((p) =>

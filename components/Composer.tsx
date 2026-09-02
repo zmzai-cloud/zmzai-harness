@@ -43,7 +43,7 @@ type Props = {
   running: boolean;
   selectedModel: ModelRef | null;
   onSelectModel: (m: ModelRef | null) => void;
-  onSend: (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort, skill?: { id: string; name: string }) => void;
+  onSend: (text: string, images?: { url: string; mediaType: string }[], effort?: ThinkingEffort, skill?: { id: string; name: string }, references?: string[]) => void;
   onAbort: () => void;
 };
 
@@ -291,14 +291,12 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     let full = body || "（见附件图片）";
     // @ 引用的文件收集为上下文提示（agent 有 fs 工具，按路径自行读取）
     const refs = [...body.matchAll(/(^|\s)@([^\s@]+)/g)].map((m) => m[2]);
-    if (refs.length > 0) {
-      full += `\n\n---\n\n<context-files>\n用户在消息中引用了以下文件，处理前请先读取：\n${[...new Set(refs)].join("\n")}\n</context-files>`;
-    }
     onSend(
       full,
       images.map((im) => ({ url: im.url, mediaType: im.mediaType })),
       effort === "off" ? undefined : effort,
       skill ? { id: skill.id, name: skill.name } : undefined,
+      [...new Set(refs)],
     );
     setText("");
     setSkill(null);

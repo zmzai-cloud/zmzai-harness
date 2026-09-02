@@ -23,12 +23,14 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     images?: { url: string; mediaType: string }[];
     effort?: string;
     skillId?: string;
+    references?: string[];
   } | null;
   const text = body?.text?.trim() ?? "";
   const effort = (EFFORTS as readonly string[]).includes(body?.effort ?? "") ? (body?.effort as Effort) : undefined;
   const images = (body?.images ?? []).filter(
     (im) => typeof im?.url === "string" && im.url.length > 0 && im.url.length < 8_000_000 && /^image\//.test(im.mediaType ?? ""),
   );
+  const references = [...new Set((body?.references ?? []).filter((path): path is string => typeof path === "string" && path.length > 0 && path.length <= 1024 && !path.includes("\0")))].slice(0, 32);
   if (!text && images.length === 0) {
     return NextResponse.json({ error: "消息不能为空" }, { status: 400 });
   }
@@ -60,7 +62,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
 
   try {
     await withRequestCookie(cookieHeader, () =>
-      runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}), ...(selected ? { skill: { id: selected.id, name: selected.name, digest: selected.digest } } : {}) }),
+      runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}), ...(references.length ? { references } : {}), ...(selected ? { skill: { id: selected.id, name: selected.name, digest: selected.digest } } : {}) }),
     );
     // AI 摘要标题：后台生成不阻塞响应；仅当标题仍是占位时覆盖
     if (autoTitleSeed && text) {

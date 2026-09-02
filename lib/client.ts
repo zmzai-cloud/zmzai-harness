@@ -115,7 +115,8 @@ export const client = {
     images?: { url: string; mediaType: string }[],
     effort?: ThinkingEffort,
     skillId?: string,
-  ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort, skillId }).then((r) => j<{ ok: boolean }>(r)),
+    references?: string[],
+  ) => post(`/api/sessions/${sessionId}/prompt`, { text, agent, model, images, effort, skillId, references }).then((r) => j<{ ok: boolean }>(r)),
 
   replyPermission: (
     sessionId: string,
