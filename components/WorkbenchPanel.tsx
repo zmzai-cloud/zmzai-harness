@@ -101,8 +101,16 @@ export default function WorkbenchPanel({
   const [activePath, setActivePath] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [canvasPath, setCanvasPath] = useState<string | null>(null);
-  const userSelectedTab = useRef(false);
+  // 用户手动离开的那条 preview 产物路径（而非「永久锁定」）：只抑制同一条产物
+  // 的重复推荐，新一轮 run 产生的新 HTML 产物仍可自动推荐。跨会话由组件 key 重置。
+  const suppressedPreviewPath = useRef<string | null>(null);
+  const canvasPathRef = useRef<string | null>(null);
   const loadSeq = useRef(0);
+
+  // 同步 canvasPath 到 ref，供 openFile 回调读取最新值而不引入依赖
+  useEffect(() => {
+    canvasPathRef.current = canvasPath;
+  }, [canvasPath]);
 
   // 文件树列宽（VSCode 默认 ~240）
   const [treeWidth, setTreeWidth] = useState<number>(() => {
@@ -152,6 +160,8 @@ export default function WorkbenchPanel({
     setEditing(false);
     setAnchorLine(line);
     setActivePath(path);
+    // 用户主动打开文件时，抑制当前 preview 产物再抢焦点（用户想看的是文件）
+    if (canvasPathRef.current) suppressedPreviewPath.current = canvasPathRef.current;
     void client
       .fsFile(path, sessionId)
       .then((f) => {
@@ -178,7 +188,8 @@ export default function WorkbenchPanel({
 
   useEffect(() => {
     const latestPreview = editedPaths?.find((path) => /\.html?$/i.test(path));
-    if (!latestPreview || userSelectedTab.current) return;
+    // 新产物路径未被用户手动离开过才推荐；离开过的路径不再抢焦点
+    if (!latestPreview || suppressedPreviewPath.current === latestPreview) return;
     setCanvasPath(latestPreview);
     setTab("preview");
   }, [editedPaths]);
@@ -198,7 +209,10 @@ export default function WorkbenchPanel({
   };
 
   const select = (t: Tab) => {
-    userSelectedTab.current = true;
+    // 用户切走 preview 时，记录当前 preview 路径以抑制其重复抢焦点
+    if (t !== "preview" && tab === "preview" && canvasPath) {
+      suppressedPreviewPath.current = canvasPath;
+    }
     setTab(t);
     setEditing(false);
   };
