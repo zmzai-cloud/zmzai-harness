@@ -194,6 +194,80 @@ export type UsageInfo = {
 
 export type DiffFile = { path: string; additions: number; deletions: number; binary?: boolean };
 
+// ===== 本地可信交付（P0）=====
+
+export type DeliveryStatus =
+  | "running"
+  | "verifying"
+  | "ready_for_review"
+  | "verification_failed"
+  | "unverified"
+  | "cancelled"
+  | "accepted"
+  | "discarded";
+
+export type DeliverySnapshot = {
+  baseHeadSha?: string;
+  worktreeHeadSha?: string;
+  worktreeFingerprint: string;
+  executionPlanHash?: string;
+  deliveryCommitSha?: string;
+  deliveryTreeSha?: string;
+  capturedAt: string;
+};
+
+export type DeliveryAttempt = {
+  id: string;
+  deliveryId: string;
+  runId: string;
+  sequence: number;
+  status: DeliveryStatus;
+  unverifiedReason?: "no_required_checks" | "snapshot_stale";
+  verificationSnapshot?: DeliverySnapshot;
+  supersedesAttemptId?: string;
+  supersededAt?: string;
+  changedPaths: string[];
+  summary?: string;
+  risks: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CommandRunView = {
+  id: string;
+  deliveryAttemptId: string;
+  kind: "agent" | "verification" | "service" | "browser_qa";
+  requirement: "required" | "advisory";
+  label: string;
+  command: string;
+  cwd: string;
+  status: "running" | "passed" | "failed" | "cancelled";
+  exitCode?: number;
+  durationMs?: number;
+  startedAt: string;
+  endedAt?: string;
+  output: string;
+  outputTruncated: boolean;
+  outputBytes: number;
+  verificationSnapshotFingerprint?: string;
+};
+
+export type DeliveryOverview = {
+  delivery: {
+    id: string;
+    projectId: string;
+    sessionId: string;
+    effectiveWorkspaceRoot: string;
+    baseRef?: string;
+    worktreeBranch?: string;
+    activeAttemptId?: string;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  attempt: DeliveryAttempt | null;
+  runs: CommandRunView[];
+};
+
 export type GitDiff = { available: boolean; files: DiffFile[]; diff: string; truncated?: boolean };
 
 /** 个人 key 状态（仅掩码回显）。 */

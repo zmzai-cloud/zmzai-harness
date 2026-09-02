@@ -5,6 +5,7 @@ import { Button, cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
 import DiffView from "./DiffView";
+import DeliveryReview from "./DeliveryReview";
 import type { DiffFile, GitDiff, SessionSummary } from "@/lib/types";
 
 type Checkpoint = { hash: string; time: string; subject: string; checkpoint: boolean };
@@ -69,6 +70,8 @@ export default function ReviewPane({
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [cpsOpen, setCpsOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  /** 交付审查区块展开态（P0：默认收起，避免与现有 diff 审查抢焦点）。 */
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
 
   const refreshCps = useCallback(async () => {
     try {
@@ -188,7 +191,25 @@ export default function ReviewPane({
         >
           刷新
         </button>
+        {/* 交付审查（P0）：本地可信交付入口，默认收起 */}
+        <button
+          type="button"
+          onClick={() => setDeliveryOpen((v) => !v)}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[0.6875rem] font-medium transition-colors",
+            deliveryOpen ? "bg-surface-2 text-ink" : "text-ink-3 hover:text-ink",
+          )}
+        >
+          交付
+        </button>
       </div>
+
+      {/* 交付审查区块（P0 最小证据展示） */}
+      {deliveryOpen && (
+        <div className="shrink-0 border-b border-line">
+          <DeliveryReview sessionId={sessionId ?? null} />
+        </div>
+      )}
 
       {/* 检查点下拉列表 */}
       {cpsOpen && (

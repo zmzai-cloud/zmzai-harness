@@ -1,6 +1,9 @@
 import type {
   AgentInfo,
   AuthStatus,
+  CommandRunView,
+  DeliveryAttempt,
+  DeliveryOverview,
   FailoverEndpointView,
   FailoverEventView,
   GitDiff,
@@ -218,6 +221,16 @@ export const client = {
 
   checkpointRestore: (hash: string, sessionId?: string | null) =>
     send("PUT", "/api/git/checkpoint", { hash, sessionId }).then((r) => j<{ ok: boolean }>(r)),
+
+  // ===== 本地可信交付（P0）=====
+
+  deliveryOverview: (sessionId: string) =>
+    fetch(`/api/deliveries?sessionId=${encodeURIComponent(sessionId)}`).then((r) => j<DeliveryOverview>(r)),
+
+  deliveryAction: (sessionId: string, action: string, payload?: Record<string, unknown>) =>
+    post("/api/deliveries/attempt", { sessionId, action, ...payload }).then((r) =>
+      j<{ ok: boolean; attempt?: DeliveryAttempt; runs?: CommandRunView[]; valid?: boolean | null; merge?: { mergeCommitSha: string; baseRef: string }; error?: string; detail?: string }>(r),
+    ),
 
   keyStatus: () => fetch("/api/settings/key").then((r) => j<KeyStatus>(r)),
 
