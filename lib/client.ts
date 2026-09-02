@@ -1,6 +1,8 @@
 import type {
   AgentInfo,
   AuthStatus,
+  FailoverEndpointView,
+  FailoverEventView,
   GitDiff,
   LecternEvent,
   KeyStatus,
@@ -227,6 +229,16 @@ export const client = {
     send("PUT", "/api/settings/key", { relayUrl }).then((r) => j<KeyStatus>(r)),
 
   keyClear: () => fetch("/api/settings/key", { method: "DELETE" }).then((r) => j<KeyStatus>(r)),
+
+  /** 降级端点（设置 → 模型与凭据 → 降级端点）：读 / 整体替换。 */
+  failoverGet: () =>
+    fetch("/api/settings/failover").then((r) =>
+      j<{ endpoints: FailoverEndpointView[]; failover: FailoverEventView[] }>(r),
+    ),
+  failoverSave: (endpoints: { baseUrl: string; modelId?: string | null; apiKey?: string | null; apiKeyMasked?: string | null }[]) =>
+    send("PUT", "/api/settings/failover", { endpoints }).then((r) =>
+      j<{ endpoints: FailoverEndpointView[]; failover: FailoverEventView[] }>(r),
+    ),
 
   mcpStatus: () => fetch("/api/mcp").then((r) => j<McpStatuses>(r)),
 

@@ -9,7 +9,7 @@ import AccountBlock from "@/components/AccountBlock";
 import ThemeToggle from "@/components/ThemeToggle";
 import { client } from "@/lib/client";
 import { readPref, writePref } from "@/lib/prefs";
-import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo, SkillOption } from "@/lib/types";
+import type { KeyStatus, McpStatuses, PermissionDomain, PermissionSettings, PluginInfo, RelayKeyInfo, SkillOption, FailoverEventView } from "@/lib/types";
 
 /**
  * 设置中心（独立页，替代旧版弹窗）：左侧导航 + 右侧分区内容。
@@ -156,6 +156,132 @@ function AuditCard() {
         )}
       </div>
     </section>
+  );
+}
+
+/** 降级端点（设置 → 模型与凭据 → 降级端点）：主 relay 端点首事件失败时依次切换。
+ *  可增删改多个备用端点，apiKey 仅掩码回显（留掩码 = 沿用旧 key，空 = 清除）。 */
+function FailoverCard() {
+  const [rows, setRows] = useState<{ baseUrl: string; modelId: string; apiKey: string; apiKeyMasked: string | null; dirty: boolean }[]>([]);
+  const [log, setLog] = useState<FailoverEventView[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    void client.failoverGet().then((r) => {
+      setRows(r.endpoints.map((ep) => ({ baseUrl: ep.baseUrl, modelId: ep.modelId ?? "", apiKey: "", apiKeyMasked: ep.apiKeyMasked, dirty: false })));
+      setLog(r.failover);
+    }).catch(() => undefined);
+  }, []);
+
+  const add = () => setRows((r) => [...r, { baseUrl: "", modelId: "", apiKey: "", apiKeyMasked: null, dirty: true }]);
+
+  const update = (i: number, patch: Partial<{ baseUrl: string; modelId: string; apiKey: string }>) =>
+    setRows((r) => r.map((row, j) => (j === i ? { ...row, ...patch, dirty: true } : row)));
+
+  const remove = (i: number) => setRows((r) => r.filter((_, j) => j !== i));
+
+  const save = () =>
+    void (async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const endpoints = rows
+          .filter((r) => r.baseUrl.trim())
+          .map((r) => ({
+            baseUrl: r.baseUrl.trim(),
+            modelId: r.modelId.trim() || null,
+            // apiKey 空但 apiKeyMasked 存在 → 未改动，保留旧 key（服务端按掩码匹配沿用）
+            apiKey: r.apiKey.trim() || null,
+            apiKeyMasked: r.apiKeyMasked,
+          }));
+        const res = await client.failoverSave(endpoints);
+        setRows(res.endpoints.map((ep) => ({ baseUrl: ep.baseUrl, modelId: ep.modelId ?? "", apiKey: "", apiKeyMasked: ep.apiKeyMasked, dirty: false })));
+        setLog(res.failover);
+        setSaved(true);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "保存失败");
+      } finally {
+        setBusy(false);
+      }
+    })();
+
+  return (
+    <Card title="降级端点" desc="主 relay 端点首个事件失败时，依次切换到这些备用 OpenAI 兼容端点。留空 = 不降级（仅主端点）。">
+      {rows.length === 0 ? (
+        <div className="mb-3 rounded-sm bg-bg px-2.5 py-2 text-[0.6875rem] leading-5 text-ink-3">
+          未配置降级端点。主端点不可用时请求会直接失败；配置一个备用端点可在主端点故障时自动切换。
+        </div>
+      ) : (
+        <div className="mb-3 space-y-2">
+          {rows.map((row, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                value={row.baseUrl}
+                onChange={(e) => update(i, { baseUrl: e.target.value })}
+                placeholder="https://backup.zmzai.cloud/v1"
+                spellCheck={false}
+                autoComplete="off"
+                className={inputClass}
+              />
+              <input
+                value={row.modelId}
+                onChange={(e) => update(i, { modelId: e.target.value })}
+                placeholder="模型 id（可选）"
+                spellCheck={false}
+                autoComplete="off"
+                className="h-9 w-36 shrink-0 rounded-sm border border-line bg-bg px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-ink"
+              />
+              <input
+                value={row.apiKey}
+                onChange={(e) => update(i, { apiKey: e.target.value })}
+                placeholder={row.apiKeyMasked ?? "apiKey（可选）"}
+                type="password"
+                spellCheck={false}
+                autoComplete="off"
+                className="h-9 w-32 shrink-0 rounded-sm border border-line bg-bg px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-ink"
+              />
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                className="shrink-0 rounded-sm px-1.5 py-1 text-xs text-ink-3 transition-colors hover:text-danger"
+                aria-label="删除端点"
+              >
+                删除
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={add} className="text-[0.6875rem] text-ink-3 transition-colors hover:text-ink">
+          + 添加端点
+        </button>
+        <Button variant="primary" size="sm" disabled={busy} onClick={save}>
+          保存
+        </Button>
+        {saved && <span className="text-[0.6875rem] text-success">已保存，后续请求即时生效。</span>}
+        {error && <span className="text-[0.6875rem] text-danger">{error}</span>}
+      </div>
+
+      {log.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="mb-1.5 text-[0.6875rem] font-semibold text-ink-3">最近降级记录</div>
+          <div className="space-y-1">
+            {log.map((e, i) => (
+              <div key={i} className="flex items-center gap-2 font-mono text-[0.625rem] text-ink-3">
+                <span className="shrink-0 text-warning">#{e.attempt}</span>
+                <span className="truncate">{e.from ?? "(主端点)"}</span>
+                <span className="shrink-0 text-ink-3">→</span>
+                <span className="truncate">{e.to}</span>
+                <span className="ml-auto shrink-0 truncate text-ink-3" title={e.error}>{e.error.slice(0, 60)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -593,6 +719,7 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                 </Card>
+                <FailoverCard />
               </>
             )}
 

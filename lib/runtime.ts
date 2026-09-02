@@ -26,7 +26,7 @@ import {
   type SqliteSessionStore,
 } from "@zmzai/agent-framework";
 import { currentCookieHeader } from "./request-cookie";
-import { authHeaders, ollamaBase } from "./settings";
+import { authHeaders, ollamaBase, getFailoverEndpoints } from "./settings";
 import { capsFor } from "./model-caps";
 import { relayBase } from "./relay";
 import { loadMcpConfig } from "./mcp-config";
@@ -105,18 +105,24 @@ function providerWithOllama(inner: ModelProvider): ModelProvider {
   };
 }
 
-/** 路由降级端点（env 配置，可选）：LECTERN_FALLBACK_BASE_URL 必填（旧 HARNESS_FALLBACK_BASE_URL 兼容），
- *  LECTERN_FALLBACK_API_KEY / LECTERN_FALLBACK_MODEL 选填。 */
-function failoverEndpointsFromEnv(): FailoverEndpoint[] {
+/** 路由降级端点（settings 优先，env 兜底兼容旧 HARNESS_* / LECTERN_FALLBACK_*）：
+ *  设置页可增删改多个备用端点；env 单端点保留兼容，排在 settings 之后。
+ *  每次请求重新求值——设置页改动无需重启 runtime 即时生效。 */
+function failoverEndpoints(): FailoverEndpoint[] {
+  const fromSettings = getFailoverEndpoints().map((ep) => ({
+    baseUrl: ep.baseUrl,
+    apiKey: ep.apiKey,
+    modelId: ep.modelId,
+  }));
   const baseUrl = process.env.LECTERN_FALLBACK_BASE_URL ?? process.env.HARNESS_FALLBACK_BASE_URL;
-  if (!baseUrl) return [];
-  return [
-    {
+  if (baseUrl) {
+    fromSettings.push({
       baseUrl,
       apiKey: process.env.LECTERN_FALLBACK_API_KEY ?? process.env.HARNESS_FALLBACK_API_KEY,
       modelId: process.env.LECTERN_FALLBACK_MODEL ?? process.env.HARNESS_FALLBACK_MODEL,
-    },
-  ];
+    });
+  }
+  return fromSettings;
 }
 
 /** 路由降级环形日志（P0 可观测）：最近 20 次端点切换，/api/models 透出。 */
@@ -227,8 +233,9 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
       // 真实模型能力：查进程内缓存（由 /api/models 与 resolveModel 链路灌入）。
       // 未命中回落 provider 默认的 128k/16k——与不配置时行为一致。
       modelCaps: (modelId) => capsFor(modelId),
-      // 路由降级（N2a）：主端点首个流事件即报错时依次切备用端点
-      failoverEndpoints: failoverEndpointsFromEnv(),
+      // 路由降级（N2a）：主端点首个流事件即报错时依次切备用端点；函数形式每请求求值，
+      // 设置页增删改降级端点即时生效（无需重启）。
+      failoverEndpoints: () => failoverEndpoints(),
       // 降级可观测（P0）：切换事件进环形日志，/api/models 透出给 UI
       onFailover: (event) => {
         const log = failoverLog();

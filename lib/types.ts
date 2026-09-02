@@ -198,6 +198,12 @@ export type GitDiff = { available: boolean; files: DiffFile[]; diff: string; tru
 /** 个人 key 状态（仅掩码回显）。 */
 export type KeyStatus = { configured: boolean; masked: string | null; relayUrl?: string; ollamaUrl?: string | null };
 
+/** 降级端点（设置页）：baseUrl 必填，apiKey 仅掩码回显。 */
+export type FailoverEndpointView = { baseUrl: string; modelId: string | null; apiKeyMasked: string | null };
+
+/** 降级日志条目（最近端点切换，/api/models 与设置页透出）。 */
+export type FailoverEventView = { from?: string; to: string; error: string; attempt: number };
+
 /** 权限自动执行配置（设置 → 通用 → 权限）：域 → ask 逐次确认 / auto 自动始终允许。 */
 export type PermissionDomain = "terminal" | "edit" | "task" | "gitWrite";
 export type PermissionAction = "ask" | "auto";

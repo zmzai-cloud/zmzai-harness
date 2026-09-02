@@ -16,7 +16,10 @@ import type { PermissionAction, PermissionDomain, PermissionSettings } from "./t
 const settingsFile = resolve(dataDir, "settings.json");
 const secretFile = resolve(dataDir, ".secret");
 
-export type HarnessSettings = { personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string };
+export type HarnessSettings = { personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string; failoverEndpoints?: FailoverEndpointInput[] };
+
+/** 降级端点（设置页可增删改，持久化在 settings.json）。apiKey 属敏感凭据，落盘前加密。 */
+export type FailoverEndpointInput = { baseUrl: string; apiKey?: string; modelId?: string };
 
 /** ---- 对称加密（AES-256-GCM）：密钥文件 0600，密文 base64(iv|tag|ct) ---- */
 
@@ -51,7 +54,9 @@ function decrypt(encoded: string): string | null {
 
 /** ---- settings.json 读写（明文自动迁移为密文） ---- */
 
-type StoredSettings = { personalKeyEnc?: string; personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string; permissions?: Partial<Record<PermissionDomain, PermissionAction>> };
+type StoredSettings = { personalKeyEnc?: string; personalKey?: string; personalKeyPrefix?: string; relayUrl?: string; ollamaUrl?: string; permissions?: Partial<Record<PermissionDomain, PermissionAction>>; failoverEndpoints?: StoredFailoverEndpoint[] };
+
+type StoredFailoverEndpoint = { baseUrl: string; apiKeyEnc?: string; apiKey?: string; modelId?: string };
 
 function readStored(): StoredSettings {
   try {
@@ -76,6 +81,18 @@ function read(): HarnessSettings {
     // 旧版明文迁移：加密落盘并从 settings.json 删除明文
     next.personalKey = stored.personalKey;
     write({ ...stored, personalKeyEnc: encrypt(stored.personalKey), personalKey: undefined });
+  }
+  // 降级端点：apiKey 解密，旧版明文自动迁移为密文
+  if (stored.failoverEndpoints?.length) {
+    next.failoverEndpoints = stored.failoverEndpoints.map((ep) => {
+      let apiKey = ep.apiKeyEnc ? (decrypt(ep.apiKeyEnc) ?? undefined) : undefined;
+      if (ep.apiKey) {
+        apiKey = ep.apiKey;
+        ep.apiKeyEnc = encrypt(ep.apiKey);
+        ep.apiKey = undefined;
+      }
+      return { baseUrl: ep.baseUrl, ...(apiKey ? { apiKey } : {}), ...(ep.modelId ? { modelId: ep.modelId } : {}) };
+    });
   }
   return next;
 }
@@ -136,6 +153,35 @@ export function savePersonalKey(key: string | null, relayUrl?: string | null, ol
   if (relayUrl !== undefined) next.relayUrl = relayUrl?.trim() || undefined;
   if (ollamaUrl !== undefined) next.ollamaUrl = ollamaUrl?.trim() || undefined;
   write(next);
+}
+
+/** 降级端点（设置页增删改）：apiKey 加密落盘，baseUrl 归一化（去尾部斜杠）。
+ *  空列表 = 清除全部备用端点（恢复仅主端点）。 */
+export function saveFailoverEndpoints(endpoints: FailoverEndpointInput[] | null): FailoverEndpointInput[] {
+  const next = readStored();
+  if (!endpoints || endpoints.length === 0) {
+    delete next.failoverEndpoints;
+    write(next);
+    return [];
+  }
+  const cleaned = endpoints
+    .map((ep) => ep.baseUrl?.trim())
+    .filter((baseUrl): baseUrl is string => !!baseUrl)
+    .map((baseUrl, i) => {
+      const src = endpoints[i];
+      const ep: StoredFailoverEndpoint = { baseUrl: baseUrl.replace(/\/$/, "") };
+      if (src.apiKey?.trim()) ep.apiKeyEnc = encrypt(src.apiKey.trim());
+      if (src.modelId?.trim()) ep.modelId = src.modelId.trim();
+      return ep;
+    });
+  next.failoverEndpoints = cleaned;
+  write(next);
+  return getSettings().failoverEndpoints ?? [];
+}
+
+/** 降级端点读取（apiKey 已解密）。 */
+export function getFailoverEndpoints(): FailoverEndpointInput[] {
+  return read().failoverEndpoints ?? [];
 }
 
 /** 密钥轮换（P0）：生成新 .secret 并把已存的 personalKeyEnc 重加密迁移。
