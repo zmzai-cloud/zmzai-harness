@@ -197,8 +197,8 @@ export default function FileEditor({
   }, [anchorLine, path]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-bg">
-      <div ref={hostRef} className="min-h-0 flex-1 text-[0.75rem]" />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+      <div ref={hostRef} className="min-h-0 min-w-0 flex-1 text-[0.75rem]" />
       <div className="flex h-7 shrink-0 items-center gap-2 border-t border-line bg-surface px-3 font-mono text-[0.625rem] text-ink-3">
         <span className={cn(dirty && "text-warning")}>{saving ? "保存中…" : dirty ? "未保存" : "已同步"}</span>
         {savedAt && !dirty && <span>保存于 {savedAt}</span>}

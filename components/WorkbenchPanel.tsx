@@ -428,11 +428,11 @@ export default function WorkbenchPanel({
       </div>
 
       {/* 面板区：与 tablist 配对，aria-labelledby 指向当前选中 tab */}
-      <div className="flex min-h-0 flex-1" role="tabpanel" aria-labelledby={`wb-tab-${tab}`}>
+      <div className="flex min-h-0 min-w-0 flex-1" role="tabpanel" aria-labelledby={`wb-tab-${tab}`}>
           {/* 左侧文件树（VSCode 风格 explorer，仅文件 tab 显示；其他 tab 让出全部宽度） */}
           {tab === "files" && (
             <>
-              <div className="wb-region wb-region-edge-r flex-col" style={{ width: treeWidth }}>
+              <div className="wb-region wb-region-edge-r shrink-0 flex-col" style={{ width: treeWidth }}>
                 {/* 树头部：32px（§3.4「文件/终端 tab 行 30--32px」，原 28px 偏矮） */}
                 <div className="wb-bar-sm gap-1.5 px-2 text-[0.6875rem] font-medium uppercase tracking-wider text-ink-3">
                   <span>资源管理器</span>
@@ -450,7 +450,7 @@ export default function WorkbenchPanel({
             </>
           )}
           {/* 右侧预览区 */}
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {renderPreview()}
           </div>
       </div>
