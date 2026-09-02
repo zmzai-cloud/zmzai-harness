@@ -429,26 +429,23 @@ export default function WorkbenchPanel({
 
       {/* 面板区：与 tablist 配对，aria-labelledby 指向当前选中 tab */}
       <div className="flex min-h-0 min-w-0 flex-1" role="tabpanel" aria-labelledby={`wb-tab-${tab}`}>
-          {/* 左侧文件树（VSCode 风格 explorer，仅文件 tab 显示；其他 tab 让出全部宽度） */}
-          {tab === "files" && (
-            <>
-              <div className="wb-region wb-region-edge-r shrink-0 flex-col" style={{ width: treeWidth }}>
-                {/* 树头部：32px（§3.4「文件/终端 tab 行 30--32px」，原 28px 偏矮） */}
-                <div className="wb-bar-sm gap-1.5 px-2 text-[0.6875rem] font-medium uppercase tracking-wider text-ink-3">
-                  <span>资源管理器</span>
-                  <span className="ml-auto text-[0.625rem] normal-case tracking-normal text-ink-3">↻</span>
-                </div>
-                <FileTree onOpenFile={(path) => openFile(path)} sessionId={sessionId} />
-              </div>
-              {/* 文件树 ↔ 预览拖拽条 */}
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                onMouseDown={onTreeDragStart}
-                className="w-1 shrink-0 cursor-col-resize border-x border-line transition-colors hover:bg-selected-strong"
-              />
-            </>
-          )}
+          {/* 文件树只在 Files 视图可见，但不卸载：切到审查/预览后再回来时，展开目录、
+              已选文件与滚动位置都保持。切换会话仍由 WorkbenchPanel 的 key 重建隔离。 */}
+          <div className={cn("wb-region wb-region-edge-r shrink-0 flex-col", tab !== "files" && "hidden")} style={{ width: treeWidth }}>
+            {/* 树头部：32px（§3.4「文件/终端 tab 行 30--32px」，原 28px 偏矮） */}
+            <div className="wb-bar-sm gap-1.5 px-2 text-[0.6875rem] font-medium uppercase tracking-wider text-ink-3">
+              <span>资源管理器</span>
+              <span className="ml-auto text-[0.625rem] normal-case tracking-normal text-ink-3">↻</span>
+            </div>
+            <FileTree onOpenFile={(path) => openFile(path)} sessionId={sessionId} />
+          </div>
+          {/* 文件树 ↔ 预览拖拽条 */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onMouseDown={onTreeDragStart}
+            className={cn("w-1 shrink-0 cursor-col-resize border-x border-line transition-colors hover:bg-selected-strong", tab !== "files" && "hidden")}
+          />
           {/* 右侧预览区 */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {renderPreview()}
