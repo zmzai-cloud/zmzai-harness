@@ -32,12 +32,26 @@ describe("deriveTaskPresentation 状态机表", () => {
     expect(r.state).toBe("idle");
   });
 
-  it("行 2：有权限请求 → needs_input", () => {
+  it("行 2a：有权限请求 → needs_input", () => {
     const r = deriveTaskPresentation(
       ctx({ permissionRequest: { id: "p1", permission: "edit" } }),
     );
     expect(r.state).toBe("needs_input");
     expect(r.icon).toBe("question");
+  });
+
+  it("行 2b：会话等待态（无 PermissionRequest）→ needs_input", () => {
+    // 框架 runner 在 unknownSideEffect 时发 waiting_input，此时并没有 pending
+    // 卡片。若不消费 waiting，会掉到行 6/行 7 显示成「待审查」或「就绪」。
+    const r = deriveTaskPresentation(ctx({ sessionStatus: "waiting" }));
+    expect(r.state).toBe("needs_input");
+  });
+
+  it("行 2b：等待态优先于行 6 的编辑态（等用户 > 可审查）", () => {
+    const r = deriveTaskPresentation(
+      ctx({ sessionStatus: "waiting", editedPaths: ["src/a.ts"] }),
+    );
+    expect(r.state).toBe("needs_input");
   });
 
   it("行 3a：sessionStatus=running → running", () => {

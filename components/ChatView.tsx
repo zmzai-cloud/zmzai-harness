@@ -3,26 +3,13 @@ import { Markdown, PermissionCard, Reasoning, ToolCard, ToolGroup, cn } from "@z
 
 import type { ConnectionState } from "@/lib/client";
 import type { ChatViewData, TodoItem } from "@/lib/chat-projector";
-import type { ModelRef, Part, PermissionRequest, SessionIsolation, SessionSummary } from "@/lib/types";
+import type { ModelRef, Part, PermissionRequest, SessionSummary } from "@/lib/types";
 import Composer from "./Composer";
 import DiffView, { diffStat } from "./DiffView";
 
 type SubagentActivity = import("@/lib/chat-projector").SubagentActivity;
 type UiPart = import("@/lib/chat-projector").UiPart;
 type UiMessage = import("@/lib/chat-projector").UiMessage;
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "running":
-      return "运行中";
-    case "waiting_permission":
-      return "等待授权";
-    case "waiting_input":
-      return "等待输入";
-    default:
-      return "空闲";
-  }
-}
 
 /** N5 失败自动诊断：把已知错误名/错误消息关键词映射成「可能原因 + 建议动作」，
  *  让错误卡不再只报干巴巴的 name+message，而是一眼能懂「为什么断、该怎么办」。 */
@@ -212,7 +199,11 @@ type Props = {
   status: string;
   pending: PermissionRequest | null;
   sessionId: string | null;
-  /** SSE 连接状态（断线自动重连；reconnecting/offline 时顶栏出横幅）。 */
+  /**
+   * SSE 连接状态（断线自动重连；reconnecting/offline 时出横幅）。
+   * 注意：连接态 pill 已随「对话」头部条一并并入任务上下文条（visual spec §4.2），
+   * 由 page.tsx 通过 TaskBarActions 渲染，此处只保留横幅用途。
+   */
   connState: ConnectionState;
   selectedModel: ModelRef | null;
   onSelectModel: (m: ModelRef | null) => void;
@@ -226,17 +217,11 @@ type Props = {
   onAbort: () => void;
   /** 点击消息内的文件路径（可带行号）→ 产物侧文件 Tab 打开并滚动定位（P1-10/F2 联动）。 */
   onOpenFile: (path: string, line?: number) => void;
-  /** 自治档位（P1-7）：确认 = 每次授权弹卡；自动 = 自动授 always。 */
-  autoMode: boolean;
-  onToggleAuto: () => void;
   /** 历史分页：还有更早消息 + 触顶时回调（page.tsx 分页拉取并 prepend）。 */
   hasMore: boolean;
   onLoadMore: () => void;
   /** 乐观回显：发送瞬间的用户消息（真实 message.updated 到达后自动让位）。 */
   echo: { text: string; images: { url: string; mediaType: string }[] } | null;
-  /** 会话级 worktree 隔离状态（robustness-plan §9）：隔离会话顶栏出「隔离副本」pill + 合并/丢弃。 */
-  isolation?: SessionIsolation | null;
-  onWorktreeAction?: (action: "merge" | "discard") => Promise<void>;
   /** 隔离操作结果横幅（page.tsx 持有，8s 自动消退）。 */
   wtNotice?: { kind: "ok" | "error"; text: string } | null;
   /** 回溯重发：编辑某条用户消息并从此重跑（page.tsx 调 API，截断 + 重跑由服务端完成）。 */
@@ -391,7 +376,7 @@ function SummaryCard({ summary, onFollowUp, timeline }: { summary: SessionSummar
   );
 }
 
-export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, autoMode, onToggleAuto, hasMore, onLoadMore, echo, isolation, onWorktreeAction, wtNotice, onRewind }: Props) {
+export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, hasMore, onLoadMore, echo, wtNotice, onRewind }: Props) {
   const { messages, todos, reads, summary, editedPaths, checkpoint } = data;
   // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
@@ -496,87 +481,9 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
   }, [messages, pending]);
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-bg">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-4">
-        <span className="text-xs font-semibold text-ink">对话</span>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-[0.6875rem] font-medium ${
-            running
-              ? "bg-live-tint text-live"
-              : status === "waiting_permission"
-                ? "bg-warning-tint text-warning"
-                : "bg-surface-2 text-ink-2"
-          }`}
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${running ? "animate-pulse bg-live" : "bg-ink-3"}`} />
-          {statusLabel(status)}
-        </span>
-        <span className="flex-1" />
-        {/* SSE 连接态：正常不占视觉；断线时黄点转圈 / 红点 + 横幅 */}
-        {connState !== "connected" && (
-          <span
-            title={connState === "offline" ? "连接已中断，点击面板可重试" : "连接中断，正在自动恢复…"}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[0.6875rem] font-medium",
-              connState === "offline" ? "bg-danger-tint text-danger" : "bg-warning-tint text-warning",
-            )}
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", connState === "offline" ? "bg-danger" : "animate-pulse bg-warning")} />
-            {connState === "offline" ? "已断开" : "重连中"}
-          </span>
-        )}
-        {/* 会话级 worktree 隔离（robustness-plan §9）：pill 常驻标识 + 合并/丢弃 */}
-        {isolation?.enabled && onWorktreeAction && (
-          <span className="inline-flex items-center gap-1 rounded-pill bg-surface-2 py-0.5 pl-2 pr-1 text-[0.6875rem] font-medium text-ink-2">
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-              <circle cx="4.5" cy="3.5" r="1.7" />
-              <circle cx="4.5" cy="12.5" r="1.7" />
-              <circle cx="11.5" cy="6.5" r="1.7" />
-              <path d="M4.5 5.2v5.6M11.5 8.2c0 2-2 2.6-5.2 2.8" strokeLinecap="round" />
-            </svg>
-            <span title={isolation.path}>隔离副本</span>
-            <button
-              type="button"
-              disabled={running}
-              onClick={() => void onWorktreeAction("merge")}
-              title="把副本提交合并回主工作区当前分支（主工作区有未提交改动时会拒绝）"
-              className="rounded-pill px-1.5 py-0.5 text-[0.625rem] font-medium text-ink transition-colors hover:bg-accent hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              合并
-            </button>
-            <button
-              type="button"
-              disabled={running}
-              onClick={() => void onWorktreeAction("discard")}
-              title="丢弃副本（未合并的提交一并删除）"
-              className="rounded-pill px-1.5 py-0.5 text-[0.625rem] font-medium text-ink-3 transition-colors hover:bg-danger-tint hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              丢弃
-            </button>
-          </span>
-        )}
-        {/* 自治档位（P1-7）：对标 Qoder 的 Quest 自动执行 */}
-        <button
-          type="button"
-          onClick={onToggleAuto}
-          title={autoMode ? "自动档：写文件/命令不再逐次确认，点击切回确认档" : "确认档：敏感操作逐次确认，点击切到自动档"}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[0.6875rem] font-medium transition-colors",
-            autoMode ? "bg-accent text-accent-ink" : "bg-surface-2 text-ink-2 hover:text-ink",
-          )}
-        >
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            {autoMode ? (
-              <path d="M2.5 8.5l3.5 3.5 7.5-8" strokeLinecap="round" strokeLinejoin="round" />
-            ) : (
-              <>
-                <rect x="3.5" y="6.5" width="9" height="7" rx="1.2" />
-                <path d="M5.5 6.5V5a2.5 2.5 0 0 1 5 0v1.5" />
-              </>
-            )}
-          </svg>
-          {autoMode ? "自动" : "确认"}
-        </button>
-      </div>
+      {/* 头部条已移除：「对话 / 空闲 / 自动」等控件按 visual spec §4.2 并入任务
+          上下文条（TaskContextStrip，由 page.tsx 渲染在对话区顶部）。此处直接进
+          入横幅与消息流，不再有第二根 36px 条。 */}
       {/* 断线横幅：reconnecting 提示自动恢复；offline 提示手动刷新（重连仍在后台退避重试） */}
       {connState !== "connected" && (
         <div
@@ -622,7 +529,7 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
               type="button"
               onClick={() => onOpenFile(path)}
               title={`${path} · 点击在文件 Tab 打开`}
-              className="max-w-44 truncate rounded-pill bg-surface-2 px-2 py-0.5 font-mono text-[0.625rem] text-ink-2 transition-colors hover:bg-line hover:text-ink"
+              className="max-w-44 truncate rounded-[3px] bg-surface-2 px-2 py-0.5 font-mono text-[0.625rem] text-ink-2 transition-colors hover:bg-line hover:text-ink"
             >
               {path}
             </button>
@@ -657,15 +564,14 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
       {/* N6 实时进度：运行中展示「正在执行第 N 步 · 当前工具」，取代单一状态点 */}
       {running && visible.length > 0 && <LiveProgressBar todos={todos ?? []} currentTool={currentTool} />}
         {visible.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-2">
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <path d="M8 1.5l1.6 3.6 3.9.4-2.9 2.6.8 3.9L8 10l-3.4 2l.8-3.9L2.5 5.5l3.9-.4L8 1.5z" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div className="text-base font-semibold tracking-tight text-ink">今天要做点什么？</div>
-            <div className="max-w-sm text-xs leading-6 text-ink-3">
-              给 Agent 下达任务，它会直接在当前项目里工作；需要改动文件时你会在这里收到授权确认。
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="text-ink-3" aria-hidden>
+              <path d="M8 1.8v3.1M8 11.1v3.1M1.8 8h3.1M11.1 8h3.1" strokeLinecap="round" />
+              <path d="M8 4.9A3.1 3.1 0 1 0 8 11.1 3.1 3.1 0 0 0 8 4.9z" />
+            </svg>
+            <div className="text-[0.9375rem] font-semibold text-ink">开始一个任务</div>
+            <div className="max-w-md text-xs leading-5 text-ink-3">
+              描述你想交付的结果。Agent 会在当前项目中执行，变更、审查和成果会留在这项任务里。
             </div>
           </div>
         )}

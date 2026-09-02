@@ -140,8 +140,19 @@ const ROWS: PredicateRow[] = [
         ctx.hasGitChanges !== true &&
         !ctx.terminal.hasLiveProcess),
   },
-  // 2. 有面向用户的权限/澄清请求 → needs_input
-  { state: "needs_input", match: (ctx) => ctx.permissionRequest !== null },
+  // 2. 有面向用户的权限/澄清请求，或会话本身处于等待态 → needs_input
+  //
+  //    补充（spec 缺口）：spec §6 表格行 2 只写了 `permissionRequest !== null`，
+  //    但 `SessionStatus` 域里的 `"waiting"` 没有任何一行消费它。实测框架确实会
+  //    在没有 PermissionRequest 的情况下进入等待态——runner 检测到 unknownSideEffect
+  //    时发 `session.status: waiting_input`（zmzai-framework/src/core/runtime/runner.ts），
+  //    此时 UI 既无 pending 卡片、状态也不是 running，若照抄 spec 会落到行 6/行 7，
+  //    把「等你处理」显示成「待审查」甚至「就绪」。等待态的语义就是「面向用户在等」，
+  //    因此这里把 `waiting` 与 permissionRequest 并列。
+  {
+    state: "needs_input",
+    match: (ctx) => ctx.permissionRequest !== null || ctx.sessionStatus === "waiting",
+  },
   // 3. 运行中，或有活动 PTY 进程 → running（优先于 failed）
   {
     state: "running",
@@ -185,6 +196,24 @@ function deriveFailureBadge(
     return { kind: "command_failed", label: "命令以非零退出" };
   }
   return null;
+}
+
+/**
+ * 可预览产物判定：目前仅 HTML 家族（与成果预览的实际渲染能力一致）。
+ *
+ * 单点定义，供 WorkbenchPanel（自动推荐预览）与 page.tsx（组装
+ * previewablePaths）共用——此前两处各写一份正则且不一致
+ * （`/\.html?$/` 漏了 `.htm`），属于典型漂移，统一到此处。
+ */
+const PREVIEWABLE_RE = /\.(html?|htm)$/i;
+
+export function isPreviewable(path: string): boolean {
+  return PREVIEWABLE_RE.test(path);
+}
+
+/** 从一批路径中筛出可预览产物（保持原顺序）。 */
+export function previewableOf(paths: string[]): string[] {
+  return paths.filter(isPreviewable);
 }
 
 /**

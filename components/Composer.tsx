@@ -277,7 +277,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
     <div ref={rootRef} className="relative shrink-0 px-6 pb-4">
       {/* @ 文件引用浮层 */}
       {atQuery != null && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-64 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-64 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">引用文件 · @路径</div>
           {atItems.map((hit, i) => (
             <button
@@ -309,7 +309,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
 
       {/* 弹层：模型选择 / Skill 选择（与输入卡片同宽） */}
       {popup === "model" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="flex items-center justify-between px-2 py-1.5">
             <span className="text-[0.6875rem] font-semibold text-ink-3">模型 · 对本条消息生效</span>
             <span className="font-mono text-[0.625rem] text-ink-3">{modelChoices.length} 个可用</span>
@@ -420,7 +420,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         </div>
       )}
       {popup === "effort" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">推理力度 · 对本条消息生效</div>
           {([
             { value: "off" as const, label: "默认", hint: "不发送 reasoning_effort（最兼容）" },
@@ -449,7 +449,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         </div>
       )}
       {popup === "skill" && (
-        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
+        <div className="absolute bottom-full left-1/2 mb-2 max-h-72 w-full max-w-3xl -translate-x-1/2 overflow-y-auto rounded-md border border-line bg-surface p-1.5 shadow-lg ring-1 ring-line">
           <div className="px-2 py-1.5 text-[0.6875rem] font-semibold text-ink-3">
             Skill · 注入本次 prompt（.zmzai/skills）
           </div>
@@ -475,8 +475,8 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         </div>
       )}
 
-      {/* 输入卡片：textarea 内嵌 + 底部工具行（opencode/Claude 式：与消息列同宽居中） */}
-      <div className="mx-auto w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl rounded-xl border border-line bg-surface transition-colors focus-within:border-line-strong">
+      {/* 任务编辑器：与消息流同宽、固定在底部。它不是一张独立的圆角聊天卡。 */}
+      <div className="mx-auto w-full max-w-3xl min-[1440px]:max-w-4xl min-[1920px]:max-w-5xl border border-line bg-surface transition-colors focus-within:border-line-strong">
         {/* 图片附件预览 chips */}
         {images.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">
@@ -498,7 +498,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         )}
         {skill && (
           <div className="flex items-center gap-1 px-3 pt-2.5">
-            <span className="inline-flex max-w-64 items-center gap-1 rounded-pill bg-accent/15 px-2 py-0.5 text-[0.6875rem] font-medium text-accent-strong">
+            <span className="inline-flex max-w-64 items-center gap-1 rounded-[3px] bg-accent/15 px-2 py-0.5 text-[0.6875rem] font-medium text-accent-strong">
               <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
                 <path d="M8 1.5l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 10.9l-3.7 2.1.8-4.2L2 5.9l4.2-.5L8 1.5z" strokeLinejoin="round" />
               </svg>
@@ -519,7 +519,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
         <Textarea
           ref={textareaRef}
           onPaste={onPaste}
-          className="max-h-44 min-h-[52px] w-full resize-none border-0 bg-transparent px-3.5 py-3 text-sm text-ink shadow-none outline-none placeholder:text-ink-3 focus-visible:ring-0"
+          className="max-h-44 min-h-[60px] w-full resize-none border-0 bg-transparent px-3.5 py-3 text-sm leading-6 text-ink shadow-none outline-none placeholder:text-ink-3 focus-visible:ring-0"
           value={text}
           onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={(e) => {
@@ -568,13 +568,13 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             e.target.value = "";
           }}
         />
-        <div className="flex items-center gap-0.5 px-2 pb-2">
+        <div className="flex h-8 items-center gap-0.5 border-t border-line px-2">
           <button
             type="button"
             onClick={() => setPopup((p) => (p === "model" ? null : "model"))}
             title="选择模型（对本条消息生效）"
             className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[0.6875rem] font-medium transition-colors",
+              "inline-flex h-7 items-center gap-1.5 rounded-[3px] px-2 text-[0.6875rem] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong",
               popup === "model" ? "bg-surface-2 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink",
             )}
           >
@@ -592,7 +592,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             type="button"
             onClick={() => fileRef.current?.click()}
             title="添加图片（多模态输入）"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            className="wb-iconbtn text-ink-3"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
               <path d="M13.5 7.5l-5.8 5.8a3.1 3.1 0 0 1-4.4-4.4l6-6a2.1 2.1 0 0 1 3 3l-6 6a1.1 1.1 0 0 1-1.6-1.6l5.3-5.3" strokeLinecap="round" strokeLinejoin="round" />
@@ -603,7 +603,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             onClick={() => setPopup((p) => (p === "skill" ? null : "skill"))}
             title="注入 Skill"
             className={cn(
-              "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-surface-2 hover:text-ink",
+              "wb-iconbtn transition-colors",
               popup === "skill" || skill ? "text-ink" : "text-ink-3",
             )}
           >
@@ -617,7 +617,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
             onClick={() => setPopup((p) => (p === "effort" ? null : "effort"))}
             title={`推理力度（对本条消息生效）${effort !== "off" ? ` · 当前 ${effort}` : ""}`}
             className={cn(
-              "inline-flex h-7 items-center gap-0.5 rounded-full px-1.5 transition-colors hover:bg-surface-2 hover:text-ink",
+              "inline-flex h-7 items-center gap-0.5 rounded-[3px] px-1.5 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong",
               popup === "effort" || effort !== "off" ? "text-ink" : "text-ink-3",
             )}
           >
@@ -650,7 +650,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
               type="button"
               onClick={onAbort}
               title="中止"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-danger/50 text-danger transition-colors hover:bg-danger/10"
+              className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-danger/50 text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
             >
               <span className="h-2.5 w-2.5 rounded-[2px] bg-danger" />
             </button>
@@ -660,7 +660,7 @@ export default function Composer({ sessionId, running, selectedModel, onSelectMo
               onClick={submit}
               disabled={!text.trim() && images.length === 0}
               title="发送（⏎）"
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-bg transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-25"
+              className="flex h-7 w-7 items-center justify-center rounded-[3px] bg-ink text-bg transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selected-strong disabled:cursor-not-allowed disabled:opacity-25"
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" strokeLinecap="round" strokeLinejoin="round" />

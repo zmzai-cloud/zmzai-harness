@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
+import { isPreviewable } from "@/lib/task-presentation";
+import type { SessionSummary } from "@/lib/types";
 import CanvasPane from "./CanvasPane";
 import FileEditor from "./FileEditor";
 import FileTree from "./FileTree";
@@ -90,11 +92,14 @@ export default function WorkbenchPanel({
   openRequest,
   editedPaths,
   sessionId,
+  summary,
 }: {
   openRequest?: { path: string; ts: number; line?: number } | null;
   /** 本轮 Agent 触碰过的文件（file.edited 投影，最新在前）——文件 Tab 顶部 chips + Git 高亮。 */
   editedPaths?: string[];
   sessionId?: string | null;
+  /** 任务终态小结（session.summary，N5）：透传给 ReviewPane 渲染任务内变更摘要（§V3-1）。 */
+  summary?: SessionSummary | null;
 }) {
   const [tab, setTab] = useState<Tab>("review");
   const [fileTabs, setFileTabs] = useState<FileTab[]>([]);
@@ -105,6 +110,11 @@ export default function WorkbenchPanel({
   // 的重复推荐，新一轮 run 产生的新 HTML 产物仍可自动推荐。跨会话由组件 key 重置。
   const suppressedPreviewPath = useRef<string | null>(null);
   const canvasPathRef = useRef<string | null>(null);
+  // 用户是否在本任务里显式选过 tab（automatic/user 契约）：显式选择后不再自动切换。
+  // 与 suppressedPreviewPath 的区别：后者只抑制「同一条产物路径」的重复推荐，
+  // 前者一旦为真，本任务内所有自动推荐都停手（§7.4 / §7.5「if the user has not
+  // explicitly selected a workbench tab in this task」）。
+  const userChoseTab = useRef(false);
   const loadSeq = useRef(0);
 
   // 同步 canvasPath 到 ref，供 openFile 回调读取最新值而不引入依赖
@@ -156,6 +166,8 @@ export default function WorkbenchPanel({
   const [anchorLine, setAnchorLine] = useState<number | undefined>(undefined);
   const openFile = useCallback((path: string, line?: number) => {
     const seq = ++loadSeq.current;
+    // 用户主动打开文件（消息内路径点击 / 文件树 / ⌘P）→ 视为显式选择
+    userChoseTab.current = true;
     setTab("files");
     setEditing(false);
     setAnchorLine(line);
@@ -174,7 +186,7 @@ export default function WorkbenchPanel({
           setActivePath((cur) => (next.some((t) => t.path === cur) ? cur : (next[Math.min(idx, next.length - 1)]?.path ?? null)));
           return next;
         });
-        if (/\.(html?|htm)$/i.test(f.path)) setCanvasPath(f.path);
+        if (isPreviewable(f.path)) setCanvasPath(f.path);
       })
       .catch((err: Error) => {
         if (seq !== loadSeq.current) return;
@@ -186,12 +198,20 @@ export default function WorkbenchPanel({
       });
   }, [sessionId]);
 
+  // 自动推荐（automatic 侧）：产物 → 成果预览（§7.5）；无可预览产物但有首个编辑 → 审查（§7.4）。
+  // 用户已显式选过 tab 则完全停手；只抑制单条产物路径的场景由 suppressedPreviewPath 负责。
   useEffect(() => {
-    const latestPreview = editedPaths?.find((path) => /\.html?$/i.test(path));
-    // 新产物路径未被用户手动离开过才推荐；离开过的路径不再抢焦点
-    if (!latestPreview || suppressedPreviewPath.current === latestPreview) return;
-    setCanvasPath(latestPreview);
-    setTab("preview");
+    const latestPreview = editedPaths?.find(isPreviewable);
+    if (latestPreview) {
+      // 用共享判定而非就地正则：此前这里写的是 `/\.html?$/i`，漏了 `.htm`，
+      // 导致 .htm 产物不会被自动推荐（与「成果预览」的真实能力不一致）。
+      setCanvasPath(latestPreview);
+      if (!userChoseTab.current && suppressedPreviewPath.current !== latestPreview) {
+        setTab("preview");
+      }
+      return;
+    }
+    if (!userChoseTab.current && editedPaths && editedPaths.length > 0) setTab("review");
   }, [editedPaths]);
 
   useEffect(() => {
@@ -209,6 +229,8 @@ export default function WorkbenchPanel({
   };
 
   const select = (t: Tab) => {
+    // 用户点击 tab = 显式选择，本任务内不再自动切换（automatic/user 契约）
+    userChoseTab.current = true;
     // 用户切走 preview 时，记录当前 preview 路径以抑制其重复抢焦点
     if (t !== "preview" && tab === "preview" && canvasPath) {
       suppressedPreviewPath.current = canvasPath;
@@ -217,7 +239,7 @@ export default function WorkbenchPanel({
     setEditing(false);
   };
 
-  const activeIsHtml = activeFile ? /\.(html?|htm)$/i.test(activeFile.path) : false;
+  const activeIsHtml = activeFile ? isPreviewable(activeFile.path) : false;
 
   // 预览/编辑区：根据 active tab 决定渲染内容
   const renderPreview = () => {
@@ -333,9 +355,23 @@ export default function WorkbenchPanel({
             </div>
           );
         case "review":
-          return <ReviewPane editedPaths={editedPaths ?? []} sessionId={sessionId} />;
+          return (
+            <ReviewPane
+              editedPaths={editedPaths ?? []}
+              sessionId={sessionId}
+              summary={summary}
+              onOpenFiles={() => select("files")}
+            />
+          );
         case "preview":
-          return <CanvasPane path={canvasPath} onPathChange={setCanvasPath} sessionId={sessionId} />;
+          return (
+            <CanvasPane
+              path={canvasPath}
+              onPathChange={setCanvasPath}
+              sessionId={sessionId}
+              onOpenFiles={() => select("files")}
+            />
+          );
       }
   };
 

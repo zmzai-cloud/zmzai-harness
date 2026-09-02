@@ -5,16 +5,63 @@ import { Button, cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
 import DiffView from "./DiffView";
-import type { DiffFile, GitDiff } from "@/lib/types";
+import type { DiffFile, GitDiff, SessionSummary } from "@/lib/types";
 
 type Checkpoint = { hash: string; time: string; subject: string; checkpoint: boolean };
+
+/** 变更文件行：本轮任务触碰的路径以 live 色点标记（F4 高亮的延续，另加文字分组标题）。 */
+function FileRow({
+  f,
+  isTouched,
+  onOpen,
+}: {
+  f: DiffFile;
+  isTouched: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "mb-0.5 flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2",
+        isTouched && "bg-live-tint/60",
+      )}
+    >
+      {isTouched && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-live" title="本轮 Agent 触碰" />}
+      <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={f.path}>
+        {f.path}
+      </span>
+      {f.binary ? (
+        <span className="shrink-0 text-[0.625rem] text-ink-3">binary</span>
+      ) : (
+        <span className="shrink-0 font-mono text-[0.625rem]">
+          <span className="text-success">+{f.additions ?? 0}</span>{" "}
+          <span className="text-danger">-{f.deletions ?? 0}</span>
+        </span>
+      )}
+    </button>
+  );
+}
 
 /**
  * 审查 Tab：工作区未提交变更（git diff HEAD）。
  * 文件列表（+/- 统计）→ 点击进入逐文件 diff；非 git 仓库降级提示。
  * 顶部检查点条（P1-9）：列出快照 commit，支持一键回滚（二次确认）。
  */
-export default function ReviewPane({ editedPaths = [], sessionId }: { editedPaths?: string[]; sessionId?: string | null }) {
+export default function ReviewPane({
+  editedPaths = [],
+  sessionId,
+  /** 任务终态小结（session.summary，N5）：渲染为审查页的任务内变更摘要（§V3-1）。 */
+  summary = null,
+  /** 跳到「文件」Tab 的路线（§4.5：审查必须给出到 Files 的路线，但不内嵌完整文件树）。 */
+  onOpenFiles,
+}: {
+  editedPaths?: string[];
+  sessionId?: string | null;
+  summary?: SessionSummary | null;
+  onOpenFiles?: () => void;
+}) {
   const [data, setData] = useState<GitDiff | null>(null);
   const [selected, setSelected] = useState<DiffFile | null>(null);
   const [fileDiff, setFileDiff] = useState<string>("");
@@ -77,6 +124,17 @@ export default function ReviewPane({ editedPaths = [], sessionId }: { editedPath
   }
 
   const files = data?.files ?? [];
+  // §7.4：头部给出变更文件数与加减总量（能算就算，binary 文件没有行统计）。
+  const totals = files.reduce(
+    (acc, f) => ({
+      add: acc.add + (f.binary ? 0 : (f.additions ?? 0)),
+      del: acc.del + (f.binary ? 0 : (f.deletions ?? 0)),
+    }),
+    { add: 0, del: 0 },
+  );
+  // §7.4：本轮任务触碰的路径优先，其余归为「其他工作区变更」，并明确标注这个区别。
+  const touched = files.filter((f) => editedPaths.includes(f.path));
+  const others = files.filter((f) => !editedPaths.includes(f.path));
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="wb-bar-sm">
@@ -98,6 +156,12 @@ export default function ReviewPane({ editedPaths = [], sessionId }: { editedPath
             <span className="text-[0.6875rem] text-ink-3">
               {files.length > 0 ? `${files.length} 个文件变更` : "没有未提交变更"}
             </span>
+            {files.length > 0 && (
+              <span className="shrink-0 font-mono text-[0.625rem]">
+                <span className="text-success">+{totals.add}</span>{" "}
+                <span className="text-danger">-{totals.del}</span>
+              </span>
+            )}
             {data?.truncated && <span className="text-[0.625rem] text-warning">diff 已截断</span>}
           </>
         )}
@@ -167,41 +231,71 @@ export default function ReviewPane({ editedPaths = [], sessionId }: { editedPath
         </div>
       )}
 
+      {/* §V3-1：任务内变更摘要（有终态小结时）。失败/中断也保留，作为可追溯的次级信息（§7.5）。 */}
+      {!selected && summary && (
+        <div className="shrink-0 border-b border-line bg-surface-2/40 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "shrink-0 text-[0.625rem] font-semibold uppercase tracking-wider",
+                summary.kind === "error" ? "text-danger" : summary.kind === "aborted" ? "text-warning" : "text-ink-3",
+              )}
+            >
+              {summary.kind === "error" ? "已失败" : summary.kind === "aborted" ? "已中断" : "已完成"}
+            </span>
+            {summary.meta && (
+              <span className="shrink-0 font-mono text-[0.625rem] text-ink-3">
+                改 {summary.meta.filesEdited} 文件 · {summary.meta.toolCalls} 次调用
+                {summary.meta.durationMs > 0 && ` · ${(summary.meta.durationMs / 1000).toFixed(1)}s`}
+              </span>
+            )}
+          </div>
+          {summary.text && (
+            <p className="mt-1 line-clamp-2 text-[0.6875rem] leading-4 text-ink-2" title={summary.text}>
+              {summary.text}
+            </p>
+          )}
+        </div>
+      )}
+
       {selected ? (
         <DiffView diff={fileDiff} path={selected?.path} />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {/* §4.5 空态：必须说明「基线是什么」+「当前变更状态」，而不是一句泛泛的占位。 */}
           {files.length === 0 && (
-            <div className="px-3 py-6 text-center text-xs leading-5 text-ink-3">
-              Agent 修改文件后，变更会出现在这里供审查。
+            <div className="flex flex-col items-start gap-2 px-3 py-6">
+              <span className="text-[0.8125rem] font-medium text-ink-2">当前没有未提交变更</span>
+              <span className="text-xs leading-5 text-ink-3">
+                这里的基线是最近一次提交（<code className="font-mono">git diff HEAD</code>）：工作区里相对它的改动会出现在此处供审查。Agent 修改文件后会自动切到这里。
+              </span>
+              {onOpenFiles && (
+                <button
+                  type="button"
+                  onClick={onOpenFiles}
+                  className="mt-1 rounded-[3px] bg-surface-2 px-2 py-1 text-[0.6875rem] font-medium text-ink-2 transition-colors hover:text-ink"
+                >
+                  查看当前任务文件
+                </button>
+              )}
             </div>
           )}
-          {files.map((f) => {
-            const touched = editedPaths.includes(f.path); // F4：本轮 Agent 触碰的文件高亮
-            return (
-              <button
-                key={f.path}
-                type="button"
-                onClick={() => void openFile(f)}
-                className={cn(
-                  "mb-0.5 flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2",
-                  touched && "bg-live-tint/60",
-                )}
-              >
-                {touched && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-live" title="本轮 Agent 触碰" />}
-                <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={f.path}>
-                  {f.path}
-                </span>
-                {f.binary ? (
-                  <span className="shrink-0 text-[0.625rem] text-ink-3">binary</span>
-                ) : (
-                  <span className="shrink-0 font-mono text-[0.625rem]">
-                    <span className="text-success">+{f.additions}</span> <span className="text-danger">-{f.deletions}</span>
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {touched.length > 0 && (
+            <div className="px-2.5 pb-1 pt-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-ink-3">
+              本轮任务
+            </div>
+          )}
+          {touched.map((f) => (
+            <FileRow key={f.path} f={f} isTouched onOpen={() => void openFile(f)} />
+          ))}
+          {others.length > 0 && (
+            <div className="px-2.5 pb-1 pt-2 text-[0.625rem] font-semibold uppercase tracking-wider text-ink-3">
+              其他工作区变更
+            </div>
+          )}
+          {others.map((f) => (
+            <FileRow key={f.path} f={f} isTouched={false} onOpen={() => void openFile(f)} />
+          ))}
         </div>
       )}
     </div>

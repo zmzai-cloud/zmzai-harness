@@ -11,7 +11,17 @@ import type { ProjectsState } from "@/lib/types";
  * App 内走系统原生对话框（window.lecternNative.pickFolder）；Web 降级为手动输入路径。
  * 切换后服务端 workspaceRoot 全站跟随（会话/文件/Git/终端换库），页面整体重载。
  */
-export default function ProjectSwitcher({ onCollapseSidebar }: { onCollapseSidebar?: () => void }) {
+export default function ProjectSwitcher({
+  onCollapseSidebar,
+  /**
+   * 当前项目名上抛给父级（visual spec §4.2：任务上下文条要能辨识当前项目）。
+   * 切换器仍是侧栏的稳定起点，这里只是把名字同步出去，不做状态提升。
+   */
+  onActiveChange,
+}: {
+  onCollapseSidebar?: () => void;
+  onActiveChange?: (name: string | null) => void;
+}) {
   const [state, setState] = useState<ProjectsState | null>(null);
   const [open, setOpen] = useState(false);
   const [manual, setManual] = useState("");
@@ -26,6 +36,12 @@ export default function ProjectSwitcher({ onCollapseSidebar }: { onCollapseSideb
   useEffect(() => {
     load();
   }, [load]);
+
+  // 当前项目名上抛（§4.2）。依赖用 activeName 而非 state，避免无关字段变化触发。
+  const activeName = state?.active?.name ?? null;
+  useEffect(() => {
+    onActiveChange?.(activeName);
+  }, [activeName, onActiveChange]);
 
   // 弹层点击外部关闭
   useEffect(() => {

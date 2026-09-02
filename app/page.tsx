@@ -1,19 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar, navItemClass } from "@zmzai/theme";
 
 import CommandPalette, { type Command } from "@/components/CommandPalette";
 import ProjectSwitcher from "@/components/ProjectSwitcher";
 import SessionList from "@/components/SessionList";
+import TaskContextStrip from "@/components/TaskContextStrip";
+import TaskBarActions from "@/components/TaskBarActions";
 import ChatView from "@/components/ChatView";
 import WorkbenchPanel from "@/components/WorkbenchPanel";
-import TerminalPane from "@/components/TerminalPane";
+import DebugArea from "@/components/DebugArea";
 import AccountBlock from "@/components/AccountBlock";
 import { client, type ConnectionState } from "@/lib/client";
 import { ChatProjector, EMPTY_CHAT_VIEW, transcriptToEvents, type ChatViewData } from "@/lib/chat-projector";
 import { readPref, writePref, clearPref } from "@/lib/prefs";
+import { deriveTaskPresentation, previewableOf, type PresentationTerminal, type SessionStatus } from "@/lib/task-presentation";
 import type { SessionInfo, SessionListItem, PermissionRequest, PermissionSettings, LecternEvent, ModelRef, ThinkingEffort, AuthStatus, SessionIsolation } from "@/lib/types";
 import { PERMISSION_DOMAIN_OF } from "@/lib/types";
 
@@ -28,6 +31,30 @@ function statusLabel(status: string): string {
     default:
       return "空闲";
   }
+}
+
+/** 把 UI 会话状态映射为状态机域的 SessionStatus（state-driven spec §6）。
+ *  会话状态流里没有终态（只有 running / waiting_* / 空），终态取自
+ *  chatData.summary.kind（framework session.summary 事件的 kind）。 */
+function toSessionStatus(status: string, summaryKind?: string | null): SessionStatus {
+  if (status === "running") return "running";
+  if (status === "waiting_permission" || status === "waiting_input") return "waiting";
+  if (summaryKind === "error") return "failed";
+  if (summaryKind === "completed") return "completed";
+  return "idle";
+}
+
+/** 任务标题：首条用户消息的首行；无消息时回退「新任务」（§4.2 任务标题不为空）。 */
+function taskTitleOf(data: ChatViewData): string {
+  for (const m of data.messages) {
+    if (m.role !== "user") continue;
+    const text = m.parts
+      .map((p) => (p.part.type === "text" ? p.part.text : ""))
+      .join("")
+      .trim();
+    if (text) return text.split("\n")[0]!.slice(0, 80);
+  }
+  return "新任务";
 }
 
 function readWidth(key: string, fallback: number, min: number, max: number): number {
@@ -211,6 +238,14 @@ export default function App() {
   const [viewportHeight, setViewportHeight] = useState(() => typeof window === "undefined" ? 900 : window.innerHeight);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(() => readWidth("lectern:bottom-panel-height", 260, 160, 640));
   const [bottomPanelOpen, setBottomPanelOpen] = useState(() => typeof window === "undefined" || window.localStorage.getItem("lectern:bottom-panel-open") !== "0");
+  // 终端元数据（V2 DebugArea 收敛）：由 DebugArea/TerminalPane 上抛，供状态机消费
+  // 「会话空闲但命令还在跑 → running」「最近非零退出 → 次级失败 badge」。
+  const [terminalMeta, setTerminalMeta] = useState<PresentationTerminal>({ hasLiveProcess: false });
+  const handleTerminalState = useCallback((t: PresentationTerminal) => {
+    setTerminalMeta((prev) =>
+      prev.hasLiveProcess === t.hasLiveProcess && prev.lastExitCode === t.lastExitCode ? prev : t,
+    );
+  }, []);
   // 会话级 worktree 隔离（robustness-plan §9）：新建会话默认勾选「隔离副本」（持久化）
   const [isolateNew, setIsolateNew] = useState(false);
   // active 会话的隔离状态（切换会话时按服务端为准查询）+ 操作结果横幅
@@ -403,8 +438,20 @@ export default function App() {
       const { [id]: _drop, ...rest } = cur;
       return rest;
     });
-    if (id !== activeId) setActiveId(id);
-  }, [activeId]);
+    if (id !== activeId) {
+      // V2 DebugArea §4.6：切到一个「空闲且从未跑过」的任务时默认收起调试区，
+      // 让 Composer 成为中央锚点；有活动进程（running）或有历史终态（lastOutcome）
+      // 的任务保留用户/既有选择，不打断。
+      const target = sessions.find((s) => s.id === id);
+      if (target && !target.running && !target.lastOutcome) {
+        setBottomPanelOpen(false);
+      }
+      // 终端元数据是会话级的：切会话时先清空，避免残留上一会话的 hasLiveProcess
+      // 造成状态机短暂误判（DebugArea 重挂载后 TerminalPane 会重新上抛）。
+      setTerminalMeta({ hasLiveProcess: false });
+      setActiveId(id);
+    }
+  }, [activeId, sessions]);
 
   useEffect(() => {
     const projector = projectorRef.current ?? (projectorRef.current = new ChatProjector());
@@ -550,6 +597,9 @@ export default function App() {
     const s = await client.createSession(activeAgent, undefined, isolateNew);
     setSessions((prev) => [s, ...prev]);
     setActiveId(s.id);
+    // 全新空闲任务默认收起调试区（§4.6）：让 Composer 成为中央锚点，终端不抢戏。
+    setBottomPanelOpen(false);
+    setTerminalMeta({ hasLiveProcess: false });
     setActiveIsolation(s.isolation ? { ...s.isolation } : { enabled: false });
     if (s.isolation && !s.isolation.enabled && s.isolation.reason) {
       setWtNotice({ kind: "error", text: "隔离副本未启用（当前项目不是 git 仓库），本次会话直接在主工作区进行。" });
@@ -694,6 +744,46 @@ export default function App() {
     ? `${selectedModel.providerId}/${selectedModel.modelId}`
     : "默认模型";
 
+  // ── 任务呈现派生（state-driven spec §6 / visual spec §4.2）────────────────
+  // 全局任务状态的唯一来源：TaskContextStrip 只渲染，不做任何判断。
+  const previewablePaths = useMemo(
+    () => previewableOf(chatData.editedPaths),
+    [chatData.editedPaths],
+  );
+
+  const presentation = useMemo(
+    () =>
+      deriveTaskPresentation({
+        sessionId: activeId,
+        sessionStatus: toSessionStatus(status, chatData.summary?.kind),
+        permissionRequest: pending
+          ? { id: pending.id, permission: pending.permission }
+          : null,
+        editedPaths: chatData.editedPaths,
+        previewablePaths,
+        // V2 DebugArea 收敛：终端元数据已从占位改为真实上抛。hasLiveProcess 让
+        // 「会话空闲但命令还在跑」派生成 running；lastExitCode 转成次级失败 badge。
+        terminal: terminalMeta,
+        explicitWorkbenchTab: null,
+        explicitDebugTab: null,
+      }),
+    [
+      activeId,
+      status,
+      chatData.summary?.kind,
+      chatData.editedPaths,
+      previewablePaths,
+      pending,
+      terminalMeta,
+    ],
+  );
+
+  const taskTitle = useMemo(() => taskTitleOf(chatData), [chatData]);
+
+  // 项目名由侧栏切换器上抛（§4.2：上下文条要能辨识当前项目）。用回调身份稳定引用，
+  // 避免每次渲染都触发 ProjectSwitcher 的 effect。
+  const [projectName, setProjectName] = useState<string | null>(null);
+
   return (
     <div className="flex h-full flex-col bg-bg text-ink">
       {/* 品牌顶栏：全域统一 Navbar + 侧栏开关（主题 / 设置入口在左下角账户块菜单） */}
@@ -745,7 +835,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
         <SessionList
-          top={<ProjectSwitcher onCollapseSidebar={toggleSidebar} />}
+          top={<ProjectSwitcher onCollapseSidebar={toggleSidebar} onActiveChange={setProjectName} />}
           bottom={<AccountBlock />}
           sessions={sessions}
           activeId={activeId}
@@ -764,6 +854,24 @@ export default function App() {
         )}
         {sidebarOpen && <VerticalSplitter label="调整会话栏宽度" value={sidebarWidth} min={200} max={sidebarMax} direction={1} onReset={() => setSidebarWidth(256)} onChange={setSidebarWidth} />}
         <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+          {/* 任务上下文条（§4.2）：替代原先散落的「对话 / 空闲 / 自动」控件 */}
+          <TaskContextStrip
+            presentation={presentation}
+            title={taskTitle}
+            projectName={projectName}
+            summary={chatData.summary?.text ?? null}
+            meta={modelLabel}
+            actions={
+              <TaskBarActions
+                connState={connState}
+                isolation={activeIsolation}
+                onWorktreeAction={handleWorktreeAction}
+                locked={presentation.state === "running"}
+                autoMode={autoMode}
+                onToggleAuto={toggleAuto}
+              />
+            }
+          />
           <div className="flex min-h-0 flex-1">
             <ChatView
               data={chatData}
@@ -781,27 +889,23 @@ export default function App() {
               stalled={stalled}
               onAbort={abort}
               onOpenFile={(path, line) => setOpenFileReq({ path, ts: Date.now(), line })}
-              autoMode={autoMode}
-              onToggleAuto={toggleAuto}
               echo={echo}
-              isolation={activeIsolation}
-              onWorktreeAction={handleWorktreeAction}
               wtNotice={wtNotice}
               onRewind={handleRewind}
             />
             {workbenchOpen && (
               <div className="hidden min-[1180px]:contents">
-                <VerticalSplitter label="调整右侧工作区宽度" value={workbenchWidth} min={320} max={workbenchMax} direction={-1} onChange={setWorkbenchWidth} />
+                <VerticalSplitter label="调整右侧工作区宽度" value={workbenchWidth} min={320} max={workbenchMax} direction={-1} onReset={() => setWorkbenchWidth(384)} onChange={setWorkbenchWidth} />
                 <div className="shrink-0" style={{ width: workbenchWidth }}>
-                  <WorkbenchPanel key={activeId ?? "new-task"} sessionId={activeId} openRequest={openFileReq} editedPaths={chatData.editedPaths} />
+                  <WorkbenchPanel key={activeId ?? "new-task"} sessionId={activeId} openRequest={openFileReq} editedPaths={chatData.editedPaths} summary={chatData.summary} />
                 </div>
               </div>
             )}
           </div>
           {bottomPanelOpen && <>
-            <HorizontalSplitter label="调整底部调试面板高度" value={bottomPanelHeight} min={160} max={bottomPanelMax} onChange={setBottomPanelHeight} />
+            <HorizontalSplitter label="调整底部调试面板高度" value={bottomPanelHeight} min={160} max={bottomPanelMax} onReset={() => setBottomPanelHeight(260)} onChange={setBottomPanelHeight} />
             <div className="flex min-h-0 shrink-0 border-t border-line" style={{ height: bottomPanelHeight }}>
-              <TerminalPane key={activeId ?? "new-task"} sessionId={activeId} />
+              <DebugArea key={activeId ?? "new-task"} sessionId={activeId} onTerminalState={handleTerminalState} onCollapse={toggleBottomPanel} />
             </div>
           </>}
         </div>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@zmzai/theme";
 
 import { client } from "@/lib/client";
+import type { PresentationTerminal } from "@/lib/task-presentation";
 import type { ShellCandidate, TerminalReadAllResult } from "@/lib/types";
 import "@xterm/xterm/css/xterm.css";
 
@@ -70,7 +71,22 @@ type Sess = {
  *   shell 解析在服务端 lib/shell.ts，面板只拿到探测结果。
  * - pty 后端：交互 shell 常驻；pipe 后端（无 node-pty）降级为「输入一行跑一条命令」。
  */
-export default function TerminalPane({ sessionId }: { sessionId?: string | null }) {
+export default function TerminalPane({
+  sessionId,
+  onTerminalState,
+  trailing,
+}: {
+  sessionId?: string | null;
+  /**
+   * 把终端元数据上抛给编排层（V2 DebugArea 收敛）：page.tsx 用它替换状态机里
+   * 的占位 `hasLiveProcess:false`，让「会话空闲但命令还在跑」也派生成 running，
+   * 并把最近一次非零退出码转成次级失败 badge（§7.6）。本组件仍持有 PTY 所有权，
+   * 只上抛「发生了什么」，不做任何状态判断。
+   */
+  onTerminalState?: (t: PresentationTerminal) => void;
+  /** tab 行右侧追加动作（DebugArea 注入 collapse 按钮等）。 */
+  trailing?: ReactNode;
+}) {
   const [backend, setBackend] = useState<"pty" | "pipe">("pty");
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -97,6 +113,8 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
   const lastBoxRef = useRef<{ w: number; h: number } | null>(null);
   /** 上一次 fit 得到的网格：onResize 只在网格真的变化时才入队（防浮点取整抖动）。 */
   const lastFitRef = useRef<{ cols: number; rows: number } | null>(null);
+  /** 最近一次进程退出码（任意会话），用于上抛给状态机做次级失败 badge。 */
+  const lastExitCodeRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     defaultShellRef.current = defaultShell;
@@ -271,6 +289,10 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
             if (next !== "running" && s.id === active) {
               termRef.current?.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
             }
+          }
+          // 记录最近一次非零退出码（跨会话，供状态机次级失败 badge 用）
+          if (chunk.exitCode != null && chunk.exitCode !== 0) {
+            lastExitCodeRef.current = chunk.exitCode;
           }
         }
 
@@ -500,13 +522,24 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
   }, [sessionId]);
 
   const activeSess = sessions.find((s) => s.id === activeId) ?? null;
+
+  // 终端元数据上抛（V2）：session 列表/状态变化时同步给编排层。hasLiveProcess 由
+  // 是否存在 running 会话决定；lastExitCode 用 ref 累积（SSE 只会在进程退出时推送
+  // exitCode，避免每次 render 都触发上抛）。
+  useEffect(() => {
+    if (!onTerminalState) return;
+    onTerminalState({
+      hasLiveProcess: sessions.some((s) => s.status === "running"),
+      lastExitCode: lastExitCodeRef.current,
+    });
+  }, [sessions, onTerminalState]);
   const iconBtn =
     "flex h-6.5 w-6.5 items-center justify-center rounded-[4px] text-[#b8b8bd] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7797e8]";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#1e1e22] text-[#d4d4d4]">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-white/10 px-2">
-        <span className="px-2 text-[0.6875rem] font-semibold tracking-wide text-[#b8b8bd]">TERMINAL</span>
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-white/10 px-2">
+        <span className="px-2 text-[0.6875rem] font-semibold tracking-wide text-[#b8b8bd]">终端</span>
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="终端">
           {sessions.map((s) => {
             const isActive = s.id === activeId;
@@ -549,6 +582,7 @@ export default function TerminalPane({ sessionId }: { sessionId?: string | null 
           {backend === "pipe" && <span className="px-1 text-[0.625rem] text-[#8f8f95]">管道模式</span>}
           <button type="button" title="清屏" onClick={() => termRef.current?.clear()} className={iconBtn}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M3 4h10M5.5 4V2.5h5V4M5 6l.6 7h4.8l.6-7" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
           <button type="button" title="重启当前终端" onClick={() => void (async () => { if (!activeSess) return; await killSession(activeSess.id); await newSession(); })()} className={iconBtn}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+          {trailing}
         </div>
       </div>
 
