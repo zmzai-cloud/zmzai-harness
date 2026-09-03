@@ -14,6 +14,15 @@ const nextConfig = {
   // 桌面端打包：额外产出 .next/standalone（server.js + trace 出的运行时依赖，
   // 物理复制、无 symlink），Electron 壳直接 node server.js 起服务。
   output: "standalone",
+  // 【安全】禁止把本机数据打进产物。
+  // Next 的 standalone 文件追踪会把 `outputFileTracingRoot`（= 仓库根）下的
+  // `data/**` 一并复制进 `.next/standalone/data/`。仓库根的 data/ 是历史遗留的
+  // 老数据目录（已 gitignore），里面是**开发者的真实会话库与 .secret**，
+  // 一旦混入就会随安装包公开发布——v0.2.0 至 v0.4.3 全部中招。
+  // 显式排除，并在 scripts/check-standalone-clean.mjs 做构建后断言兜底。
+  outputFileTracingExcludes: {
+    "**": ["data/**", "**/data/**", "**/.secret", "**/*.db", "**/*.db-shm", "**/*.db-wal"],
+  },
   // 私有 TS 包，需显式转译
   transpilePackages: ["@zmzai/theme"],
   // serverExternal：不能被 bundle——framework 内部定位 wasm 资源依赖真实

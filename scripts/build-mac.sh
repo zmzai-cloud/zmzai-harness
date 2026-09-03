@@ -29,6 +29,12 @@ pnpm build
 # 误判导致 standalone 嵌套成 zmzai-harness/server.js）
 [ -f .next/standalone/server.js ] || { echo "❌ .next/standalone/server.js 缺失，standalone 布局异常，中止打包" >&2; exit 1; }
 
+# fail-fast：产物不得混入本机数据。Next 的文件追踪会把仓库根 data/（历史遗留的老
+# 数据目录，含真实会话库与 .secret）复制进 standalone 并随安装包公开发布——
+# v0.2.0~v0.4.3 双平台全部中招，只能全线下架重发。next.config.mjs 的
+# outputFileTracingExcludes 是主防线，这层是兜底。
+node scripts/check-standalone-clean.mjs || exit 1
+
 echo "==> [2/5] 组装 standalone 运行时（静态资源/页面资源拷入 standalone）"
 # next build 不自动拷贝：standalone server 按相对路径找 .next/static 与 public
 rm -rf .next/standalone/public

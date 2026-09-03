@@ -45,6 +45,9 @@ pnpm build
 # fail-fast：入口不存在就停，绝不打出会闪退的包
 [ -f .next/standalone/server.js ] || { echo "❌ .next/standalone/server.js 缺失，standalone 布局异常，中止打包" >&2; exit 1; }
 
+# fail-fast：产物不得混入本机数据（与 build-mac.sh 同款兜底，详见该处注释）
+node scripts/check-standalone-clean.mjs || exit 1
+
 echo "==> [2/5] 组装 standalone 运行时（静态资源/页面资源拷入 standalone）"
 # next build 不自动拷贝：standalone server 按相对路径找 .next/static 与 public
 guard_mv .next/standalone/public
