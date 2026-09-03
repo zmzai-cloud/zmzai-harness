@@ -227,6 +227,11 @@ function ensureWebServer() {
       LECTERN_DATA_DIR: path.join(userData, "data"),
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
       LECTERN_WORKSPACE: path.join(userData, "workspace"),
+      // 日志目录显式注入：Next 侧 instrumentation.ts 的请求级日志要落到这里，
+      // 与下方 stdio pipe 写的进程日志合流为同一个 <userData>/logs/web.log。
+      // 不注入时 instrumentation 会从 dataDir 反推".." 而偏到
+      // <userData>/data/logs（dataDir 实际是 <userData>/data/data），两处日志分裂。
+      LECTERN_LOG_DIR: path.join(userData, "logs"),
     },
     // pipe：stdout/stderr 接入日志文件（打包后 inherit 无处可看，报障无凭据）
     stdio: "pipe",
