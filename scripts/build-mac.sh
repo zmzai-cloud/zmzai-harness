@@ -49,9 +49,17 @@ guard_mv .package-build
 
 echo "==> [4/5] electron-builder 打包 macOS（dmg + zip，arm64）"
 # 无开发者签名证书：跳过 codesign / notarize（本机与自分发场景可直接运行）
-ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}" \
-CSC_IDENTITY_AUTO_DISCOVERY=false \
-pnpm exec electron-builder --mac --arm64 --publish never
+# SKIP_DMG=1 只出 zip：dmg 需要 hdiutil/ditto 挂载写 /Volumes，受限环境（CI 沙箱、
+# 无 TCC 磁盘权限的宿主）会 Operation not permitted。跳过 dmg 不影响 zip/.app。
+if [ "${SKIP_DMG:-0}" = "1" ]; then
+  ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}" \
+  CSC_IDENTITY_AUTO_DISCOVERY=false \
+  pnpm exec electron-builder --mac --arm64 --publish never -c.mac.target=zip
+else
+  ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}" \
+  CSC_IDENTITY_AUTO_DISCOVERY=false \
+  pnpm exec electron-builder --mac --arm64 --publish never
+fi
 
 echo "==> [5/6] ad-hoc 深度签名（无开发者证书，封印 Bundle 资源）"
 # electron-builder 在 CSC_IDENTITY_AUTO_DISCOVERY=false 下完全跳过签名，产物只有
@@ -63,8 +71,34 @@ if [ -n "$APP_PATH" ]; then
   codesign --force --deep --sign - "$APP_PATH"
   codesign --verify --deep --strict "$APP_PATH"
   echo "ad-hoc 签名通过：$APP_PATH"
+
+  # 签名是打包「之后」补的，而 electron-builder 的 zip/dmg 都已在签名前打完，
+  # 直接分发会拿到未封印的 app。这里用签名后的 .app 重打 zip 覆盖。
+  shopt -s nullglob
+  OLD_ZIPS=(dist/*.zip)
+  shopt -u nullglob
+  if [ ${#OLD_ZIPS[@]} -gt 0 ]; then
+    rm -f "${OLD_ZIPS[@]}"
+    ZIP_NAME="$(basename "$APP_PATH" .app)-$(node -p "require('./package.json').version")-arm64-mac.zip"
+    ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/$ZIP_NAME"
+    echo "zip 已用签名后产物重打：dist/$ZIP_NAME"
+  fi
+  shopt -s nullglob
+  DMGS=(dist/*.dmg)
+  shopt -u nullglob
+  if [ ${#DMGS[@]} -gt 0 ]; then
+    echo "⚠️ dist/*.dmg 内含未签名 app（dmg 在签名前生成），请改用 zip 安装" >&2
+  fi
 fi
 
 echo "==> [6/6] 产物"
-ls -lh dist/*.dmg dist/*.zip
-echo "完成。安装：双击 dist/*.dmg 拖入 Applications；或直接运行 dist/mac-arm64/Lectern.app"
+# dmg 可能不存在（SKIP_DMG=1）；用 nullglob 避免 ls 落空触发 set -e
+shopt -s nullglob
+ARTIFACTS=(dist/*.dmg dist/*.zip)
+shopt -u nullglob
+if [ ${#ARTIFACTS[@]} -eq 0 ]; then
+  echo "⚠️ 未找到 dist/*.dmg 或 dist/*.zip，请检查上方 electron-builder 输出" >&2
+else
+  ls -lh "${ARTIFACTS[@]}"
+fi
+echo "完成。安装：双击 dist/*.dmg 拖入 Applications；或解压 dist/*.zip 后拖入 Applications"
