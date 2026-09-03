@@ -81,6 +81,18 @@ export type SessionSummary = {
   meta?: { filesEdited: number; toolCalls: number; durationMs: number };
 };
 
+/** 任务产物（framework artifact.created 事件）：沙箱/工具产出的一次可交付文件。
+ *  按「本轮 run」归集——每个 session.summary 切分一次边界，不跨轮累积。 */
+export type Artifact = {
+  artifactId: string;
+  path: string;
+  bytes: number;
+  contentType: string;
+  downloadUrl: string;
+  previewUrl?: string;
+  createdAt: number;
+};
+
 /** 会话已持久化的转录（来自引擎 getMessages）。info 取 id/role/error，parts 即完整片段。 */
 export type SelectedSkill = { id: string; name: string; digest: string };
 export type TranscriptMessage = { info: { id: string; role: string; error?: { name: string; message: string }; skill?: SelectedSkill; references?: string[] }; parts: Part[] };

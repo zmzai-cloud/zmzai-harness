@@ -1,4 +1,4 @@
-import type { LecternEvent, Part, SelectedSkill, TranscriptMessage, SessionSummary } from "./types";
+import type { Artifact, LecternEvent, Part, SelectedSkill, TranscriptMessage, SessionSummary } from "./types";
 
 /** ChatView 消息树的数据类型与投影器。
  *
@@ -23,6 +23,12 @@ export type ChatViewData = {
   editedPaths: string[];
   /** 任务终态小结（session.summary，N5）：最近一次 run 收尾的 AI 总结 + 统计。 */
   summary: SessionSummary | null;
+  /** 本轮 run 累积中的产物（artifact.created，最新在前，去重）。运行中实时增长；
+   *  session.summary 到达时封存进 summaryArtifacts 并清空，下一轮重新累积。 */
+  artifacts: Artifact[];
+  /** 最近一次 run 收尾时封存的产物集（与 summary 一一对应），SummaryCard 下方展示。
+   *  多轮会话每轮只挂自己的产物，不跨轮累积。 */
+  summaryArtifacts: Artifact[];
   /** 长任务中途进度快照（session.checkpoint，N6）：最近一次运行中的「中间落点」，
    *  中断后据此提示「上次进行到哪」（已执行 N 个工具 · 最后一步 · 耗时）。 */
   checkpoint: SessionCheckpoint | null;
@@ -35,7 +41,7 @@ export type SessionCheckpoint = {
   elapsedMs: number;
 };
 
-export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads: [], editedPaths: [], summary: null, checkpoint: null };
+export const EMPTY_CHAT_VIEW: ChatViewData = { messages: [], todos: null, reads: [], editedPaths: [], summary: null, artifacts: [], summaryArtifacts: [], checkpoint: null };
 
 /** 把引擎持久化的转录（MessageWithParts[]）转换成投影器可消费的
  *  message.updated + message.part.updated 事件流，从而跨会话恢复历史。
@@ -66,6 +72,10 @@ export class ChatProjector {
   private editedPaths: string[] = [];
   /** 最近一次 run 终态小结（session.summary）。 */
   private summary: SessionSummary | null = null;
+  /** 本轮 run 累积中的产物（artifact.created，最新在前，去重）。 */
+  private artifacts: Artifact[] = [];
+  /** 最近一次 run 收尾封存的产物集（与 summary 一一对应）。 */
+  private summaryArtifacts: Artifact[] = [];
   /** 最近一次中途进度快照（session.checkpoint，N6）。 */
   private checkpoint: SessionCheckpoint | null = null;
 
@@ -79,6 +89,8 @@ export class ChatProjector {
     this.reads = [];
     this.editedPaths = [];
     this.summary = null;
+    this.artifacts = [];
+    this.summaryArtifacts = [];
     this.checkpoint = null;
   }
 
@@ -155,6 +167,26 @@ export class ChatProjector {
       // 任务终态小结（N5）：run 收尾的 AI 一句总结 + 结构化统计。
       // 覆盖式存储——一轮任务只有一条终态小结（多次 run 只保留最新）。
       this.summary = ev.data as SessionSummary;
+      // run 边界切分：把本轮累积的产物封存为「这一轮 run 的产物集」，
+      // 然后清空累积器等下一轮。多轮会话每轮 summary 只挂自己的产物。
+      this.summaryArtifacts = this.artifacts;
+      this.artifacts = [];
+    } else if (ev.type === "artifact.created") {
+      // 任务产物（沙箱/工具产出的一次可交付文件）：按 artifactId 去重，
+      // 最新在前。只进当前 run 的累积器，不跨轮（session.summary 会封存+清空）。
+      const d = ev.data as { artifactId: string; path: string; bytes: number; contentType: string; downloadUrl: string; previewUrl?: string };
+      if (!d.artifactId) return;
+      const existing = this.artifacts.findIndex((a) => a.artifactId === d.artifactId);
+      if (existing >= 0) this.artifacts.splice(existing, 1);
+      this.artifacts.unshift({
+        artifactId: d.artifactId,
+        path: d.path,
+        bytes: d.bytes,
+        contentType: d.contentType,
+        downloadUrl: d.downloadUrl,
+        ...(d.previewUrl ? { previewUrl: d.previewUrl } : {}),
+        createdAt: Date.now(),
+      });
     } else if (ev.type === "session.checkpoint") {
       // 长任务中途进度快照（N6）：运行中的「中间落点」，覆盖式保留最新。
       this.checkpoint = ev.data as SessionCheckpoint;
@@ -173,6 +205,8 @@ export class ChatProjector {
       this.summary = null;
       this.checkpoint = null;
       this.todos = null;
+      this.artifacts = [];
+      this.summaryArtifacts = [];
     } else if (ev.type === "subagent.started") {
       const d = ev.data as { id: string };
       this.subagentActivity.set(d.id, { steps: [] });
@@ -219,6 +253,8 @@ export class ChatProjector {
       reads: this.reads.slice(0, 8),
       editedPaths: [...this.editedPaths],
       summary: this.summary,
+      artifacts: [...this.artifacts],
+      summaryArtifacts: [...this.summaryArtifacts],
       checkpoint: this.checkpoint,
     };
   }

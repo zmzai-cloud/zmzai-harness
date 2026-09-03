@@ -3,7 +3,7 @@ import { Markdown, PermissionCard, Reasoning, ToolCard, ToolGroup, cn } from "@z
 
 import type { ConnectionState } from "@/lib/client";
 import type { ChatViewData, TodoItem } from "@/lib/chat-projector";
-import type { ModelRef, Part, PermissionRequest, SessionSummary } from "@/lib/types";
+import type { ModelRef, Part, PermissionRequest, SessionSummary, Artifact } from "@/lib/types";
 import Composer from "./Composer";
 import DiffView, { diffStat } from "./DiffView";
 
@@ -376,8 +376,41 @@ function SummaryCard({ summary, onFollowUp, timeline }: { summary: SessionSummar
   );
 }
 
+/** 产物卡片：一次可交付文件（HTML/截图/数据文件等）。轻量一行——图标（按
+ *  contentType 选）、mono 路径、人类可读大小、「打开」按钮（本地走 shell.openPath，
+ *  远端/预览走 window.open）。只展示本轮 run 的产物，不跨轮累积。 */
+function ArtifactCard({ artifact, onOpenFile }: { artifact: Artifact; onOpenFile?: (path: string) => void }) {
+  const { path, bytes, contentType, downloadUrl, previewUrl } = artifact;
+  const base = path.split("/").pop() ?? path;
+  const isImage = contentType.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(base);
+  const isHtml = contentType.includes("html") || /\.html?$/i.test(base);
+  const icon = isImage ? "🖼" : isHtml ? "🌐" : contentType.startsWith("video/") ? "🎬" : "📄";
+  const human = bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+  const open = () => {
+    const url = previewUrl || downloadUrl;
+    // 本地工作区产物：交给文件 Tab 打开（路径联动）；远端/预览：新窗口打开
+    if (onOpenFile && !url.startsWith("http")) onOpenFile(path);
+    else if (url) window.open(url, "_blank", "noopener");
+  };
+  return (
+    <button
+      type="button"
+      onClick={open}
+      className="flex w-full items-center gap-2.5 rounded-lg border border-line bg-surface px-3 py-2 text-left transition-colors hover:border-accent/40 hover:bg-surface-2"
+      title={`${path} · 点击打开`}
+    >
+      <span className="text-[0.9375rem] leading-none">{icon}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-ink-2" title={path}>{base}</span>
+      <span className="shrink-0 font-mono text-[0.625rem] text-ink-3">{human}</span>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 text-ink-3">
+        <path d="M6 3h6M6 7h6M6 11h4M3.5 3h.01M3.5 7h.01M3.5 11h.01" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
+}
+
 export default function ChatView({ data, status, pending, sessionId, connState, selectedModel, onSelectModel, onSend, onReply, onContinue, stalled, onAbort, onOpenFile, hasMore, onLoadMore, echo, wtNotice, onRewind }: Props) {
-  const { messages, todos, reads, summary, editedPaths, checkpoint } = data;
+  const { messages, todos, reads, summary, summaryArtifacts, editedPaths, checkpoint } = data;
   // 乐观回显：runLoop 首事件前有装配开销（workspace agents/记忆/历史重建），
   // 用户气泡不等 SSE，发送瞬间就显示；真实同文本 user 消息到达后不重复追加
   const visible = useMemo(() => {
@@ -824,6 +857,19 @@ export default function ChatView({ data, status, pending, sessionId, connState, 
               onSend(`基于上面的任务总结，请继续完成你建议的下一步工作，直接开始执行。\n\n（上一轮总结：${summary.text}）`)
             }
           />
+        )}
+        {/* 本轮产物卡片：只展示 summary 对应的这一轮 run 的产物（summaryArtifacts），
+            不跨轮累积。挂在 SummaryCard 下方，与「总结陈词」一起构成收尾区。 */}
+        {summary && !running && summaryArtifacts.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-ink-3">
+              <span>本轮产物</span>
+              <span className="font-mono text-[0.625rem] text-ink-3">{summaryArtifacts.length}</span>
+            </div>
+            {summaryArtifacts.map((a) => (
+              <ArtifactCard key={a.artifactId} artifact={a} onOpenFile={onOpenFile} />
+            ))}
+          </div>
         )}
         {pending && (
           <PermissionCard
