@@ -266,7 +266,9 @@ export function runtimeFor(projectPath: string, opts?: { workspaceRoot?: string 
 
   const summaryModelRef: ModelRef = {
     providerId: "openai",
-    modelId: process.env.OPENAI_MODEL ?? "gpt-4o",
+    // 与主模型默认值（relay.ts resolveAgents 的 fallback）对齐，避免未设
+    // OPENAI_MODEL 时压缩用 gpt-4o 而主链路用 deepseek-chat 造成模型名对不上。
+    modelId: process.env.OPENAI_MODEL ?? "deepseek-chat",
   };
 
   // 会话与事件同库持久化（会话稳定性 P0-①④）：SQLite store + SQLite eventLog
