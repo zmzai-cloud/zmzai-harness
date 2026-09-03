@@ -62,7 +62,9 @@ export async function POST(request: NextRequest) {
     userId: "local",
     workspaceId: "local",
     agent: body?.agent,
-    model: model ?? { providerId: "openai", modelId: process.env.OPENAI_MODEL ?? "gpt-4o" },
+    // 兜底默认值与主链路一致（relay.ts resolveAgents 的 fallback），避免
+    // 未设 OPENAI_MODEL 时会话模型落成 gpt-4o 而与 relay 实际模型对不上。
+    model: model ?? { providerId: "openai", modelId: process.env.OPENAI_MODEL ?? "deepseek-chat" },
   });
 
   // 会话级 worktree 隔离（robustness-plan §9）：仅显式勾选「隔离副本」的会话创建 worktree；
