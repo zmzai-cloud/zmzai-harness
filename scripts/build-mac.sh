@@ -82,6 +82,21 @@ if [ -n "$APP_PATH" ]; then
     ZIP_NAME="$(basename "$APP_PATH" .app)-$(node -p "require('./package.json').version")-arm64-mac.zip"
     ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/$ZIP_NAME"
     echo "zip 已用签名后产物重打：dist/$ZIP_NAME"
+    # latest-mac.yml 是 electron-builder 按「签名前」zip 算的 sha512/size，重打后
+    # 必须同步，否则 electron-updater 校验失败（或将来启用自动更新时静默拉不下来）。
+    if [ -f dist/latest-mac.yml ]; then
+      node -e '
+        const fs = require("fs"), crypto = require("crypto");
+        const zip = process.argv[1];
+        const buf = fs.readFileSync(zip);
+        const sha512 = crypto.createHash("sha512").update(buf).digest("base64");
+        const p = "dist/latest-mac.yml";
+        let y = fs.readFileSync(p, "utf8");
+        y = y.replace(/sha512: .*/g, "sha512: " + sha512).replace(/size: \d+/g, "size: " + buf.length);
+        fs.writeFileSync(p, y);
+      ' "dist/$ZIP_NAME"
+      echo "latest-mac.yml 校验和已按重打后的 zip 同步"
+    fi
   fi
   shopt -s nullglob
   DMGS=(dist/*.dmg)
