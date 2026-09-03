@@ -21,6 +21,37 @@ let tray = null;
 let pollTimer = null;
 let authWin = null;
 let gracefulDone = false;
+let webLogStream = null;
+
+/** 内嵌服务日志落盘（可观测性）：utilityProcess 的 stdio 在打包后无处可去，
+ *  用户报障时拿不到任何服务端堆栈（如 SQLite disk I/O error 只打 stderr）。
+ *  统一写入 <userData>/logs/web.log，超 5MB 归档为 web.old.log。 */
+function webLogWrite(line) {
+  if (!webLogStream) return;
+  try {
+    webLogStream.write(`[${new Date().toISOString()}] ${line}`);
+  } catch {
+    /* 日志失败不影响主流程 */
+  }
+}
+
+function openWebLog(userData) {
+  const logDir = path.join(userData, "logs");
+  const logPath = path.join(logDir, "web.log");
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > 5 * 1024 * 1024) {
+      fs.renameSync(logPath, path.join(logDir, "web.old.log"));
+    }
+    webLogStream = fs.createWriteStream(logPath, { flags: "a" });
+    webLogWrite(
+      `---- lectern v${app.getVersion()} · electron ${process.versions.electron} · node ${process.versions.node} · ${process.platform}-${process.arch} ----\n`,
+    );
+  } catch {
+    webLogStream = null;
+  }
+  return logPath;
+}
 
 /** 创建菜单栏托盘（macOS）：图标 + 状态文字点（绿●运行中 / 黄◐等待授权），
  *  点击唤起/聚焦主窗。仅打包时创建（dev 下反复重建托盘体验差，
@@ -180,6 +211,7 @@ function ensureWebServer() {
   }
   loadEnvFile();
   const userData = app.getPath("userData");
+  const logPath = openWebLog(userData);
   // standalone server.js 不解析 -p 参数，端口走 PORT 环境变量
   webProcess = utilityProcess.fork(serverEntry, [], {
     cwd: path.dirname(serverEntry),
@@ -196,12 +228,16 @@ function ensureWebServer() {
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
       LECTERN_WORKSPACE: path.join(userData, "workspace"),
     },
-    // inherit：stdout/stderr 转发到主进程（调试可见）
-    stdio: "inherit",
+    // pipe：stdout/stderr 接入日志文件（打包后 inherit 无处可看，报障无凭据）
+    stdio: "pipe",
   });
+  webProcess.stdout?.on("data", (chunk) => webLogWrite(chunk));
+  webProcess.stderr?.on("data", (chunk) => webLogWrite(chunk));
   webProcess.on("exit", (code) => {
+    webLogWrite(`[web] 内嵌服务退出 code=${code}\n`);
     if (code !== 0 && !app.isQuitting) console.error(`[harness] 内嵌服务退出码 ${code}`);
   });
+  console.log(`[lectern] 内嵌服务日志：${logPath}`);
 }
 
 /** 等待 Next.js 就绪（dev 下 next dev 编译首屏较慢，最长等 120s）。 */
@@ -254,6 +290,26 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // 单实例锁：双开会让两个内嵌 server 抢 3100 端口与同一个 SQLite 库
+  // （node:sqlite 并发打开同一 WAL 库会报 disk I/O error，全站 API 裸 500）。
+  if (!app.requestSingleInstanceLock()) {
+    app.exit(0);
+    return;
+  }
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) createWindow();
+    else {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+  // 主进程兜底崩溃日志（与内嵌服务同文件，报障一并收集）
+  process.on("uncaughtException", (err) => {
+    webLogWrite(`[main] uncaughtException: ${err?.stack ?? err}\n`);
+    console.error("[lectern] uncaughtException:", err);
+  });
   // 原生文件夹选择对话框（preload 暴露为 window.lecternNative.pickFolder）
   ipcMain.handle("dialog:pickFolder", async () => {
     const win = BrowserWindow.getAllWindows()[0];
