@@ -40,6 +40,10 @@ export type ConnectionState = "connected" | "reconnecting" | "offline";
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    // 业务错误走 400+文案；裸 5xx（body 非 JSON）= 服务端未捕获异常，指到日志
+    if (!body?.error && res.status >= 500) {
+      throw new Error(`服务异常（${res.status}）：服务端未捕获错误，详情见运行日志（账户菜单 → 打开日志文件夹）`);
+    }
     throw new Error(body?.error ?? `请求失败（${res.status}）`);
   }
   return res.json() as Promise<T>;

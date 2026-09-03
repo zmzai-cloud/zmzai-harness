@@ -98,6 +98,19 @@ export default function AccountBlock({ onChange }: { onChange?: (auth: AuthStatu
             >
               设置
             </Link>
+            {typeof window !== "undefined" && window.lecternNative?.openLogsFolder && (
+              <button
+                type="button"
+                onClick={() => {
+                  void window.lecternNative?.openLogsFolder?.();
+                  setMenu(false);
+                }}
+                title="内嵌服务运行日志（web.log），报障时请一并发来"
+                className="flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-[0.75rem] text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                打开日志文件夹
+              </button>
+            )}
             {auth?.loggedIn ? (
               <button
                 type="button"

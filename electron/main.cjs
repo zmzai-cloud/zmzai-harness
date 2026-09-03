@@ -5,7 +5,7 @@
 // dev 模式：等待外部 dev server（pnpm dev 的 next dev）就绪。
 // 壳内不跑业务逻辑；本地引擎能力（MCP/终端/git，见 legacy/）保留为后续增强。
 
-const { app, BrowserWindow, dialog, ipcMain, session, utilityProcess, Tray, globalShortcut, Notification, nativeImage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, session, utilityProcess, Tray, globalShortcut, Notification, nativeImage, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -322,6 +322,14 @@ app.whenReady().then(async () => {
   });
   // 任务完成通知桥（preload 暴露为 window.lecternNative.notifyTaskDone）
   ipcMain.on("notify:taskDone", () => notifyTaskDone());
+
+  // 打开内嵌服务日志目录（报障收集 web.log 用；web 端无此桥自动隐藏入口）
+  ipcMain.handle("logs:open", async () => {
+    const logDir = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    await shell.openPath(logDir);
+    return logDir;
+  });
 
   // SSO 登录桥：打开 auth 子窗口；若默认 session 已有共享会话 cookie 直接返回（免再登）
   ipcMain.handle("auth:openSSO", async (event) => {

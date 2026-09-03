@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld("lecternNative", {
   /** 任务完成系统通知（主进程 Notification——Electron 下 Web 通知未聚焦时不可靠）。 */
   notifyTaskDone: () => ipcRenderer.send("notify:taskDone"),
 
+  /** 打开内嵌服务日志目录（<userData>/logs，web.log 报障收集用）。返回目录路径。 */
+  openLogsFolder: () => ipcRenderer.invoke("logs:open"),
+
   /** SSO 登录：打开 auth.zmzai.cloud 子窗口（GitHub OAuth / 邮箱密码）。
    *  返回已有共享会话 cookie 载荷 { value, expiresAt } 或 null；登录完成（cookie
    *  变化）经 onSsoCookie 回调送达同样结构。expiresAt 是秒级 Unix 时间戳，
