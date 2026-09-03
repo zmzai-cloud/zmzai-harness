@@ -58,9 +58,11 @@ echo APPDATA: %APPDATA% >> "%OUT%"
 echo USERNAME: %USERNAME% >> "%OUT%"
 echo USERPROFILE: %USERPROFILE% >> "%OUT%"
 echo. >> "%OUT%"
-echo NOTE: the packaged app writes data to ^<userData^>\data\data
-echo       (LECTERN_DATA_DIR is set to ^<userData^>\data and the app appends
-echo        another "data" level). Both levels are listed below. >> "%OUT%"
+echo NOTE: v0.4.2 and earlier write data to ^<userData^>\data\data
+echo       (LECTERN_DATA_DIR was treated as a root, then another "data"
+echo        level was appended). v0.4.3+ uses ^<userData^>\data, but keeps
+echo        using data\data when that is where existing data lives.
+echo        Both levels are listed below. >> "%OUT%"
 echo. >> "%OUT%"
 
 echo --- dir: %APPDATA%\Lectern ^(level 1^) --- >> "%OUT%"
@@ -138,9 +140,16 @@ set ELECTRON_RUN_AS_NODE=1
 set PORT=%DIAGPORT%
 set HOSTNAME=127.0.0.1
 set NODE_ENV=production
-set LECTERN_DATA_DIR=%APPDATA%\Lectern\data
 set LECTERN_WORKSPACE=%APPDATA%\Lectern\workspace
 set LECTERN_LOG_DIR=%APPDATA%\Lectern\logs
+REM Mirror electron/main.cjs resolveDataDir(): keep the legacy data\data layout
+REM when that is where the existing database lives, so this diagnostic reads
+REM the very same database the installed app uses.
+set DIAGDATADIR=%APPDATA%\Lectern\data
+if not exist "%DIAGDATADIR%\zmzai.db" (
+  if exist "%DIAGDATADIR%\data\zmzai.db" set DIAGDATADIR=%DIAGDATADIR%\data
+)
+set LECTERN_DATA_DIR=%DIAGDATADIR%
 
 start "LECTERN-DIAG-SERVER" /b cmd /c ""%EXE%" "%STANDALONE%" > "%TEMP%\lectern-diag-server.log" 2>&1"
 

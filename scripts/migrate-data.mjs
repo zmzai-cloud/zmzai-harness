@@ -12,7 +12,7 @@
  * - projects.json 合并去重（按项目 id），activeId 保留目标侧已有值。
  *
  * 用法（node >= 22，node:sqlite）：
- *   node scripts/migrate-data.mjs                 # 默认源 = <repo>/data 与 <repo>/../data
+ *   node scripts/migrate-data.mjs                 # 默认源 = <repo>/data、<repo>/../data、旧版打包库 <userData>/data/data
  *   node scripts/migrate-data.mjs --from /a/data --from /b/data
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -24,9 +24,10 @@ import { DatabaseSync } from "node:sqlite";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // ---- 目标目录：与 lib/runtime-constants.ts 的平台解析保持一致 ----
+// 【语义】LECTERN_DATA_DIR / HARNESS_DATA_DIR 是**最终数据目录**而非"根"：
+// v0.4.2 及更早把它当根再补拼一级 data，打包版因此落在 <userData>/data/data。
+// 这里必须与 runtime-constants 同步，否则迁移会写进错的目录。
 function platformDataRoot() {
-  const override = process.env.LECTERN_DATA_DIR ?? process.env.HARNESS_DATA_DIR;
-  if (override) return resolve(override);
   switch (process.platform) {
     case "win32":
       return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Lectern");
@@ -36,17 +37,24 @@ function platformDataRoot() {
       return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "lectern");
   }
 }
-const targetRoot = resolve(platformDataRoot(), "data");
+function dataDirOverride() {
+  const raw = process.env.LECTERN_DATA_DIR ?? process.env.HARNESS_DATA_DIR;
+  return raw ? resolve(raw) : undefined;
+}
+const targetRoot = dataDirOverride() ?? resolve(platformDataRoot(), "data");
 
 // ---- 源目录 ----
+// 默认源含旧版打包目录 <userData>/data/data（Electron 会把老用户继续指向那里，
+// 见 electron/main.cjs resolveDataDir），便于一条命令把老库合并回目标目录。
 const fromArgs = [];
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === "--from") fromArgs.push(resolve(process.argv[++i]));
 }
+const legacyPackaged = join(targetRoot, "data");
 const sources = (fromArgs.length > 0
   ? fromArgs
-  : [resolve(repoRoot, "data"), resolve(repoRoot, "..", "data")]
-).filter((dir) => existsSync(dir));
+  : [resolve(repoRoot, "data"), resolve(repoRoot, "..", "data"), legacyPackaged]
+).filter((dir) => existsSync(dir) && resolve(dir) !== resolve(targetRoot));
 
 const dbs = []; // { dbPath, targetDir }
 for (const src of sources) {

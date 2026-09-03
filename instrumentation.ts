@@ -26,9 +26,9 @@ import { dataDir } from "./lib/runtime-constants";
 // 日志目录：优先用 Electron 显式注入的 LECTERN_LOG_DIR（= <userData>/logs），
 // 保证与 Electron 主进程侧的进程日志落在同一处，"打开日志文件夹"才能一次拿全。
 //
-// 不能只靠 dataDir 反推：LECTERN_DATA_DIR 的语义是"数据根目录"，runtime-constants
-// 内部还会再拼一级 data（打包版因此落在 <userData>/data/data），从 dataDir 取
-// ".." 会偏到 <userData>/data/logs，与 Electron 侧的 <userData>/logs 分裂。
+// 不能只靠 dataDir 反推：沿用旧版数据目录时 dataDir 是 <userData>/data/data
+// （v0.4.2 及更早把注入值当"根"再拼了一级），从 dataDir 取 ".." 会偏到
+// <userData>/data/logs，与 Electron 侧的 <userData>/logs 分裂成两处。
 const logDir = process.env.LECTERN_LOG_DIR
   ? resolve(process.env.LECTERN_LOG_DIR)
   : resolve(dataDir, "..", "logs");

@@ -196,6 +196,41 @@ function loadEnvFile() {
   }
 }
 
+/** 目录里是否已有真实数据（不只是空壳或子目录）。用于判断"老数据目录要不要沿用"。 */
+function hasLecternData(dir) {
+  try {
+    if (!fs.existsSync(dir)) return false;
+    for (const name of fs.readdirSync(dir)) {
+      if (name.endsWith(".db") || name.endsWith(".jsonl")) return true;
+      if (name === "settings.json" || name === "projects.json" || name === ".secret") return true;
+      if (name === "projects" || name === "deliveries" || name === "plugins") return true;
+    }
+  } catch {
+    /* 读不到就当作没数据 */
+  }
+  return false;
+}
+
+/** 解析最终数据目录（注入为 LECTERN_DATA_DIR，语义=终点，见 lib/runtime-constants.ts）。
+ *  新装： <userData>/data（与 next dev 一致，两边共享同一份会话）。
+ *  老版本（≤ v0.4.2）实际落在 <userData>/data/data —— 那时候注入值被当成"根"、
+ *  内部又补了一级。这里探测到老目录有货而新目录为空时继续沿用老目录：
+ *  老用户零迁移、零丢数据，连 .secret 里的个人 key 也不用重新配。
+ *  两边都有货（既跑过 dev 又跑过老打包版）时取新目录并向日志告警，
+ *  老目录内容不删，可用 scripts/migrate-data.mjs --from <老目录> 合并。 */
+function resolveDataDir(userData) {
+  const fresh = path.join(userData, "data");
+  const legacy = path.join(fresh, "data");
+  const legacyUsed = hasLecternData(legacy);
+  if (!legacyUsed) return fresh;
+  if (hasLecternData(fresh)) {
+    console.warn(`[lectern] 检测到新旧两份数据目录，已使用 ${fresh}；${legacy} 保留未删，可用 scripts/migrate-data.mjs --from "${legacy}" 合并`);
+    return fresh;
+  }
+  console.warn(`[lectern] 沿用旧版数据目录 ${legacy}（含历史会话与个人设置，未做任何搬迁）`);
+  return legacy;
+}
+
 /** 生产模式：用 utilityProcess 拉起内嵌 Next.js standalone 服务（.next/standalone/server.js）。
  *  不用 spawn + ELECTRON_RUN_AS_NODE：Electron 35+ 起 run-as-node 子进程也会向
  *  LaunchServices 注册 Foreground app → Dock 每次多弹一个无图标的「exec」图标；
@@ -212,6 +247,7 @@ function ensureWebServer() {
   loadEnvFile();
   const userData = app.getPath("userData");
   const logPath = openWebLog(userData);
+  const dataDir = resolveDataDir(userData);
   // standalone server.js 不解析 -p 参数，端口走 PORT 环境变量
   webProcess = utilityProcess.fork(serverEntry, [], {
     cwd: path.dirname(serverEntry),
@@ -223,14 +259,18 @@ function ensureWebServer() {
       // 覆盖相对路径：打包后 cwd 是 asar（只读），会话与工作区必须落用户目录。
       // LECTERN_DATA_DIR / LECTERN_WORKSPACE 是 lib/runtime-constants 实际读取的变量；
       // ZMZAI_* 为兼容别名保留（勿只写 ZMZAI_*：旧版曾因此把数据写进 app 包内）
-      ZMZAI_DATA_DIR: path.join(userData, "data"),
-      LECTERN_DATA_DIR: path.join(userData, "data"),
+      // 注意：LECTERN_DATA_DIR 是**最终数据目录**而非"根"（runtime-constants 不再补拼
+      // data）。老版本注入值被当成根→实际落在 <userData>/data/data，resolveDataDir()
+      // 会探测并沿用，保证老用户数据不丢。
+      ZMZAI_DATA_DIR: dataDir,
+      LECTERN_DATA_DIR: dataDir,
       ZMZAI_WORKSPACE: path.join(userData, "workspace"),
       LECTERN_WORKSPACE: path.join(userData, "workspace"),
       // 日志目录显式注入：Next 侧 instrumentation.ts 的请求级日志要落到这里，
       // 与下方 stdio pipe 写的进程日志合流为同一个 <userData>/logs/web.log。
-      // 不注入时 instrumentation 会从 dataDir 反推".." 而偏到
-      // <userData>/data/logs（dataDir 实际是 <userData>/data/data），两处日志分裂。
+      // 必须注入：instrumentation 在未注入时从 dataDir 反推 ".."，而沿用旧版数据
+      // 目录时 dataDir 是 <userData>/data/data，会偏到 <userData>/data/logs，
+      // 与 Electron 侧的 <userData>/logs 分裂成两处，报障时容易只拿到一半。
       LECTERN_LOG_DIR: path.join(userData, "logs"),
     },
     // pipe：stdout/stderr 接入日志文件（打包后 inherit 无处可看，报障无凭据）

@@ -12,11 +12,13 @@ import { join, resolve } from "node:path";
  *
  * 新实现固定到平台用户目录（与 Electron 打包版 userData/data 完全一致，打包版
  * 仍以 LECTERN_DATA_DIR 显式注入同一位置）：dev 与打包版、任意启动方式读写同一库。
- * LECTERN_DATA_DIR / HARNESS_DATA_DIR 仍可显式覆盖（迁移脚本、测试用）。
+ *
+ * 【语义】LECTERN_DATA_DIR / HARNESS_DATA_DIR 是**最终数据目录**，不是"根"。
+ * 命中时直接采用，不再补拼 `data`。v0.4.2 及更早把它当"根"再拼一级，导致打包版
+ * 落到 <userData>/data/data，而 dev 落在 <userData>/data，两边会话互相看不见。
+ * 注入侧写的本来就是 <userData>/data（= 平台默认路径），改语义后字符串无需变动。
  */
 function platformDataRoot(): string {
-  const override = process.env.LECTERN_DATA_DIR ?? process.env.HARNESS_DATA_DIR;
-  if (override) return resolve(override);
   switch (process.platform) {
     case "win32":
       // Electron userData on Windows = %APPDATA%/<productName>
@@ -31,7 +33,13 @@ function platformDataRoot(): string {
   }
 }
 
-export const dataDir = resolve(platformDataRoot(), "data");
+/** 显式覆盖值（迁移脚本、测试、Electron 注入用）；未设置时返回 undefined。 */
+function dataDirOverride(): string | undefined {
+  const raw = process.env.LECTERN_DATA_DIR ?? process.env.HARNESS_DATA_DIR;
+  return raw ? resolve(raw) : undefined;
+}
+
+export const dataDir = dataDirOverride() ?? resolve(platformDataRoot(), "data");
 
 export const defaultWorkspaceRoot = resolve(
   process.env.LECTERN_WORKSPACE ??
