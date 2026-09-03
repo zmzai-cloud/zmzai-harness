@@ -65,8 +65,8 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
       runtime.runner.prompt(id, { text, agent: body?.agent, model, images, ...(effort ? { effort } : {}), ...(references.length ? { references } : {}), ...(selected ? { skill: { id: selected.id, name: selected.name, digest: selected.digest } } : {}) }),
     );
     // AI 摘要标题：后台生成不阻塞响应；仅当标题仍是占位时覆盖。
-    // 显式带上本轮实际模型（runner 不回写 session.model），否则标题会由
-    // 会话创建时的旧模型生成，与当前对话用的模型不一致。
+    // 显式带上本轮实际模型：runner 会在 runLoop 回写 session.model，但
+    // 生成是异步的，传参不依赖回写时序，且 prompt 未落库时更可靠。
     if (autoTitleSeed && text) {
       void generateSessionTitle(runtime, id, text, model)
         .then((title) => {

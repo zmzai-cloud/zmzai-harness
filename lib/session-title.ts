@@ -6,9 +6,10 @@ import { streamOneText, type AgentFramework, type ModelRef } from "@zmzai/agent-
  * 做一次 one-shot 补全，把用户首条消息总结成简短中文标题。
  * 返回 null 表示生成失败——调用方保留占位标题即可。
  *
- * `model` 为本次实际使用的模型：runner 不会把 prompt 传入的 model 回写
- * session.model，所以标题生成必须由调用方显式带上当轮模型，否则会落到
- * 会话创建时的旧模型（乃至 env 兜底）。缺省时回落 session.model。
+ * `model` 为本次实际使用的模型。runner 会在 runLoop 里把当轮模型回写
+ * session.model，但因生成是异步的（prompt 之后才跑），显式传参仍更稳妥：
+ * 不依赖回写时序，且 prompt 失败或未落库时传入值才是权威来源。缺省时回落
+ * session.model。
  */
 
 const TITLE_SYSTEM_PROMPT =
