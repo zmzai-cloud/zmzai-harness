@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isSessionActive } from "@zmzai/agent-framework";
+import { isSessionActive, isSessionAwaitingPermission } from "@zmzai/agent-framework";
 
 import { resolveModel, sessionCookieName } from "@/lib/relay";
 import { cloudRuntime, activeWorkspaceRoot } from "@/lib/runtime";
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
             ? await (store as unknown as { countMessagesBySession: () => Promise<Map<string, number>> }).countMessagesBySession()
             : new Map<string, number>();
           for (const s of sessions) {
-            merged.push({ ...s, running: isSessionActive(s.id), messageCount: counts.get(s.id) ?? 0, projectId: project.id, projectName: project.name });
+            merged.push({ ...s, running: isSessionActive(s.id), awaitingPermission: isSessionAwaitingPermission(s.id), messageCount: counts.get(s.id) ?? 0, projectId: project.id, projectName: project.name });
           }
         } catch {
           /* 单项目库异常不影响整体列表 */
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     ? await (runtime.store as unknown as { countMessagesBySession: () => Promise<Map<string, number>> }).countMessagesBySession()
     : new Map<string, number>();
   // 附带运行态（P2-15 多会话并行状态点）：runner 的 activeRuns 内存表
-  const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id), messageCount: counts.get(s.id) ?? 0 }));
+  const withStatus = sessions.map((s) => ({ ...s, running: isSessionActive(s.id), awaitingPermission: isSessionAwaitingPermission(s.id), messageCount: counts.get(s.id) ?? 0 }));
   return NextResponse.json(withStatus);
 }
 

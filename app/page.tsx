@@ -502,6 +502,8 @@ export default function App() {
       if (ev.type === "session.status") setStatus((ev.data as { status: string }).status);
       else if (ev.type === "permission.asked") {
         const req = (ev.data as { request: PermissionRequest }).request;
+        // 侧边栏「待确认」即时反映（列表 API 10s 轮询只兜后台会话）
+        setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, awaitingPermission: true } : s)));
         // P1-7 自动档：全部「始终允许」；细粒度权限（设置 → 通用）：命中的域自动「始终允许」
         // 两者都读 ref 镜像，配置/档位变更不触发重订阅
         const domain = PERMISSION_DOMAIN_OF[req.permission];
@@ -518,7 +520,10 @@ export default function App() {
         } else {
           setPending(req);
         }
-      } else if (ev.type === "permission.replied") setPending(null);
+      } else if (ev.type === "permission.replied") {
+        setPending(null);
+        setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, awaitingPermission: false } : s)));
+      }
       if (!historyLoaded) liveBuffer.push(ev);
       else {
         projector.ingest(ev);

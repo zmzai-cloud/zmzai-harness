@@ -30,12 +30,14 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   archived: "已归档",
 };
 
-/** 分组求值顺序：归档 > 进行中 > 需要处理 > 最近（与状态机的有序谓词表同理，先命中先归）。 */
+/** 分组求值顺序：归档 > 待确认(HITL) > 进行中 > 需要处理 > 最近（先命中先归）。
+ *  待确认排在 running 前：被权限卡住的后台会话最需要用户看见。 */
 function groupOf(
   s: SessionListItem,
   activity?: Record<string, { kind: string; at: number }>,
 ): GroupKey {
   if (s.archived) return "archived";
+  if (s.awaitingPermission) return "needs_attention";
   if (s.running) return "running";
   // 需要处理 = 后台任务刚结束且你还没点开（未读动态），或上一次 run 以失败/中断收尾。
   if (activity?.[s.id]) return "needs_attention";
@@ -45,6 +47,7 @@ function groupOf(
 
 /** 终态 → 可读文案 + 语义色（三重表达：点形状 + 文字 + title，颜色仅辅助）。 */
 const OUTCOME: Record<string, { label: string; dot: string; text: string; tint: string }> = {
+  awaiting: { label: "待确认", dot: "animate-pulse bg-warning", text: "text-warning", tint: "bg-warning-tint" },
   running: { label: "运行中", dot: "animate-pulse bg-live", text: "text-live", tint: "bg-live-tint" },
   completed: { label: "完成", dot: "bg-success", text: "text-ink-3", tint: "bg-surface-2" },
   aborted: { label: "中断", dot: "bg-warning", text: "text-warning", tint: "bg-warning-tint" },
@@ -53,6 +56,7 @@ const OUTCOME: Record<string, { label: string; dot: string; text: string; tint: 
 };
 
 function outcomeOf(s: SessionListItem): string {
+  if (s.awaitingPermission) return "awaiting";
   if (s.running) return "running";
   return s.lastOutcome ?? (s.title ? "completed" : "idle");
 }

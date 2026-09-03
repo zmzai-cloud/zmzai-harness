@@ -19,6 +19,8 @@ export type SessionInfo = {
   time: { created: string; updated?: string };
   /** 运行态（GET /api/sessions 附带，来自 runner activeRuns）。 */
   running?: boolean;
+  /** HITL 待确认：run 挂起等待人工授权（isSessionAwaitingPermission）。 */
+  awaitingPermission?: boolean;
   /** 最近一次 run 的终态（N5）：completed/aborted/error，会话列表三态用。 */
   lastOutcome?: "completed" | "aborted" | "error";
   /** 消息数（N6，GET /api/sessions 附带，批量 GROUP BY 填充）。 */

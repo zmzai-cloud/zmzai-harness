@@ -28,8 +28,9 @@ let gracefulDone = false;
 function createTray() {
   if (process.platform !== "darwin") return;
   if (!app.isPackaged && process.env.LECTERN_TRAY !== "1") return;
-  // 云剪影 template 图标：菜单栏明暗模式自动反色（黑底 app 图标在深色菜单栏会隐形）
-  const iconPath = path.join(__dirname, "..", "build", "trayTemplate.png");
+  // 云剪影 template 图标：菜单栏明暗模式自动反色（黑底 app 图标在深色菜单栏会隐形）。
+  // 注意 build/ 不会整体进 bundle（只有 icon.icns），资产必须放 electron/assets/ 才能打包。
+  const iconPath = path.join(__dirname, "assets", "trayTemplate.png");
   const icon = fs.existsSync(iconPath)
     ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
     : nativeImage.createEmpty();
